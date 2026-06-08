@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Session Copier",
+  "description": "Copy sessionid from another Preply/localhost tab into current tab.",
+  "version": "0.1.0",
+  "permissions": [
+    "contextMenus",
+    "tabs",
+    "cookies",
+    "storage"
+  ],
+  "host_permissions": [
+    "*://preply.com/*",
+    "*://*.preply.com/*",
+    "*://preply.org/*",
+    "*://*.preply.org/*",
+    "*://localhost/*",
+    "*://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  }
+}
