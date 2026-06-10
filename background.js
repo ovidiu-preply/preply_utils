@@ -146,6 +146,34 @@ async function getSessionCookieForSourceUrl(sourceUrl) {
   return anyForHost ?? allByName[0] ?? null;
 }
 
+async function getSessionCookieForTargetUrl(targetUrl) {
+  const directCookie = await chrome.cookies.get({
+    url: targetUrl,
+    name: SESSION_COOKIE_NAME
+  });
+  if (directCookie) {
+    return directCookie;
+  }
+
+  const targetParsedUrl = parseUrl(targetUrl);
+  if (!targetParsedUrl) {
+    return null;
+  }
+
+  const allByName = await chrome.cookies.getAll({ name: SESSION_COOKIE_NAME });
+  const targetHost = normalizeHost(targetParsedUrl.hostname);
+  const candidates = allByName.filter(
+    (cookie) => cookie.domain && isCookieDomainCompatible(cookie.domain, targetHost)
+  );
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  candidates.sort((left, right) => (right.path?.length ?? 0) - (left.path?.length ?? 0));
+  return candidates[0];
+}
+
 function sourceTabIdFromMenuItem(menuItemId) {
   const match = /^source-tab-(\d+)$/.exec(String(menuItemId));
   if (!match) {
@@ -187,14 +215,44 @@ async function copySessionCookie(sourceTab, targetTab) {
     return { ok: false, reason: "invalid-target-url" };
   }
 
-  const cookieUrl = `${targetUrl.protocol}//${targetUrl.host}/`;
+  const targetCookie = await getSessionCookieForTargetUrl(targetTab.url);
+  if (!targetCookie) {
+    console.warn(`${LOG_PREFIX} target cookie missing`, {
+      targetTabId: targetTab.id,
+      targetUrl: targetTab.url
+    });
+    return { ok: false, reason: "target-cookie-missing" };
+  }
+
+  if (targetCookie.secure && targetUrl.protocol !== "https:") {
+    console.warn(`${LOG_PREFIX} cannot overwrite secure cookie on non-https target`, {
+      targetTabId: targetTab.id,
+      targetUrl: targetTab.url
+    });
+    return { ok: false, reason: "target-cookie-secure-requires-https" };
+  }
+
+  const cookieHost = targetCookie.domain ? domainFromCookie(targetCookie.domain) : targetUrl.hostname;
+  const cookieUrl = `${targetCookie.secure ? "https:" : targetUrl.protocol}//${cookieHost}${targetCookie.path || "/"}`;
   const setPayload = {
     url: cookieUrl,
     name: SESSION_COOKIE_NAME,
     value: sourceCookie.value,
-    path: "/",
-    secure: targetUrl.protocol === "https:"
+    path: targetCookie.path || "/",
+    secure: targetCookie.secure,
+    httpOnly: targetCookie.httpOnly,
+    sameSite: targetCookie.sameSite,
+    storeId: targetCookie.storeId
   };
+  if (!targetCookie.hostOnly) {
+    setPayload.domain = targetCookie.domain;
+  }
+  if (targetCookie.expirationDate) {
+    setPayload.expirationDate = targetCookie.expirationDate;
+  }
+  if (targetCookie.partitionKey) {
+    setPayload.partitionKey = targetCookie.partitionKey;
+  }
 
   const setResult = await chrome.cookies.set(setPayload);
   if (!setResult) {
