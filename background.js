@@ -136,14 +136,30 @@ async function rebuildSourceMenus(currentTab) {
       return leftTitle.localeCompare(rightTitle);
     });
 
-    for (const tab of tabsForHost) {
-      const menuId = `source-tab-${tab.id}`;
+    for (let tabIndex = 0; tabIndex < tabsForHost.length; tabIndex += 1) {
+      const tab = tabsForHost[tabIndex];
+      const copyMenuId = `source-tab-${tab.id}`;
+      const goMenuId = `source-tab-go-${tab.id}`;
       await chrome.contextMenus.create({
-        id: menuId,
+        id: copyMenuId,
         parentId: domainMenuId,
         title: toDisplayTitle(tab),
         contexts: ["page"]
       });
+      await chrome.contextMenus.create({
+        id: goMenuId,
+        parentId: domainMenuId,
+        title: "Go to tab",
+        contexts: ["page"]
+      });
+      if (tabIndex < tabsForHost.length - 1) {
+        await chrome.contextMenus.create({
+          id: `source-tab-separator-${hostIndex}-${tab.id}`,
+          parentId: domainMenuId,
+          type: "separator",
+          contexts: ["page"]
+        });
+      }
     }
   }
 
@@ -224,6 +240,14 @@ async function getSessionCookieForTargetUrl(targetUrl) {
 
 function sourceTabIdFromMenuItem(menuItemId) {
   const match = /^source-tab-(\d+)$/.exec(String(menuItemId));
+  if (!match) {
+    return null;
+  }
+  return Number(match[1]);
+}
+
+function sourceTabIdFromGoMenuItem(menuItemId) {
+  const match = /^source-tab-go-(\d+)$/.exec(String(menuItemId));
   if (!match) {
     return null;
   }
@@ -371,6 +395,46 @@ async function copyCurrentTabSessionIdToClipboard(tab) {
   return { ok: true };
 }
 
+async function focusTab(tab) {
+  if (!tab.id) {
+    return { ok: false, reason: "missing-tab-id" };
+  }
+
+  // Vivaldi workspaces/tab stacks can keep target tab effectively hidden.
+  // Try to reveal first, then activate.
+  try {
+    await chrome.tabs.show(tab.id);
+  } catch (_error) {
+    // Ignore when browser does not support/show hidden tabs API behavior.
+  }
+
+  if (typeof tab.windowId === "number") {
+    await chrome.windows.update(tab.windowId, { focused: true });
+  }
+  await chrome.tabs.update(tab.id, { active: true, highlighted: true });
+
+  const refreshed = await getTabOrNull(tab.id);
+  if (refreshed?.active && !refreshed.hidden) {
+    return { ok: true };
+  }
+
+  // Fallback: open same URL in currently visible workspace/window.
+  const activeTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  const activeTab = activeTabs[0];
+  const windowId = activeTab?.windowId;
+  if (!tab.url || typeof windowId !== "number") {
+    return { ok: false, reason: "tab-remains-hidden" };
+  }
+
+  await chrome.tabs.create({
+    windowId,
+    url: tab.url,
+    active: true
+  });
+
+  return { ok: true, reason: "opened-visible-copy" };
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   ensureRootMenu()
     .then(() => refreshMenusForActiveTab())
@@ -437,6 +501,30 @@ chrome.contextMenus.onClicked.addListener((info, clickedTab) => {
       })
       .catch((error) => {
         console.error("Failed to copy current tab session id", error);
+      });
+    return;
+  }
+
+  const goToSourceTabId = sourceTabIdFromGoMenuItem(info.menuItemId);
+  if (goToSourceTabId) {
+    getTabOrNull(goToSourceTabId)
+      .then(async (sourceTab) => {
+        if (!sourceTab) {
+          console.warn("Cannot go to source tab: source tab closed.");
+          return;
+        }
+
+        const result = await focusTab(sourceTab);
+        if (!result.ok) {
+          console.warn(`Failed to focus source tab: ${result.reason}`);
+        } else if (result.reason === "opened-visible-copy") {
+          console.warn(`${LOG_PREFIX} source tab hidden, opened visible copy`, {
+            sourceTabId: sourceTab.id
+          });
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to focus source tab", error);
       });
     return;
   }
