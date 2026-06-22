@@ -43,11 +43,14 @@ function isSupportedTabUrl(url) {
 }
 
 function toDisplayTitle(tab) {
-  const parsed = parseUrl(tab.url ?? "");
-  const host = parsed?.hostname ?? "unknown-host";
   const title = (tab.title || tab.url || "Untitled tab").replace(/\s+/g, " ").trim();
   const cappedTitle = title.length > 80 ? `${title.slice(0, 77)}...` : title;
-  return `${cappedTitle} - ${host}`;
+  return cappedTitle;
+}
+
+function hostFromTabUrl(tab) {
+  const parsed = parseUrl(tab.url ?? "");
+  return parsed?.hostname ?? "unknown-host";
 }
 
 function domainFromCookie(cookieDomain) {
@@ -104,14 +107,44 @@ async function rebuildSourceMenus(currentTab) {
 
   await chrome.contextMenus.update(ROOT_MENU_ID, { visible: true, enabled: eligibleSourceTabs.length > 0 });
 
+  const tabsByHost = new Map();
   for (const tab of eligibleSourceTabs) {
-    const menuId = `source-tab-${tab.id}`;
+    const host = hostFromTabUrl(tab);
+    const tabsForHost = tabsByHost.get(host);
+    if (tabsForHost) {
+      tabsForHost.push(tab);
+    } else {
+      tabsByHost.set(host, [tab]);
+    }
+  }
+
+  const hosts = Array.from(tabsByHost.keys()).sort((left, right) => left.localeCompare(right));
+  for (let hostIndex = 0; hostIndex < hosts.length; hostIndex += 1) {
+    const host = hosts[hostIndex];
+    const domainMenuId = `source-domain-${hostIndex}`;
     await chrome.contextMenus.create({
-      id: menuId,
+      id: domainMenuId,
       parentId: ROOT_MENU_ID,
-      title: toDisplayTitle(tab),
+      title: host,
       contexts: ["page"]
     });
+
+    const tabsForHost = tabsByHost.get(host) ?? [];
+    tabsForHost.sort((left, right) => {
+      const leftTitle = (left.title || left.url || "").toLowerCase();
+      const rightTitle = (right.title || right.url || "").toLowerCase();
+      return leftTitle.localeCompare(rightTitle);
+    });
+
+    for (const tab of tabsForHost) {
+      const menuId = `source-tab-${tab.id}`;
+      await chrome.contextMenus.create({
+        id: menuId,
+        parentId: domainMenuId,
+        title: toDisplayTitle(tab),
+        contexts: ["page"]
+      });
+    }
   }
 
 }
