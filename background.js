@@ -4,6 +4,7 @@ const SESSION_COOKIE_NAME = "sessionid";
 const LOG_PREFIX = "[SessionCopier]";
 
 let menuBuildChain = Promise.resolve();
+let activeTabRefreshTimer = null;
 
 function normalizeHost(hostname) {
   return hostname.toLowerCase().trim();
@@ -178,6 +179,18 @@ async function refreshMenusForActiveTab() {
   const activeTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   const activeTab = activeTabs[0] ?? {};
   await scheduleMenuRefreshForTab(activeTab);
+}
+
+function scheduleDebouncedActiveTabRefresh(delayMs = 120) {
+  if (activeTabRefreshTimer !== null) {
+    clearTimeout(activeTabRefreshTimer);
+  }
+  activeTabRefreshTimer = setTimeout(() => {
+    activeTabRefreshTimer = null;
+    refreshMenusForActiveTab().catch((error) => {
+      console.error("Failed to refresh menu after tab state change", error);
+    });
+  }, delayMs);
 }
 
 async function getTabOrNull(tabId) {
@@ -447,11 +460,13 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (!changeInfo.status && !changeInfo.url && !changeInfo.title) {
     return;
   }
-  if (!tab.active) {
-    return;
-  }
 
-  scheduleMenuRefreshForTab(tab ?? {});
+  // Keep context menu source list fresh even when eligible source tabs update in background.
+  scheduleDebouncedActiveTabRefresh();
+});
+
+chrome.tabs.onCreated.addListener(() => {
+  scheduleDebouncedActiveTabRefresh();
 });
 
 chrome.tabs.onRemoved.addListener(() => {
@@ -465,6 +480,21 @@ chrome.windows.onFocusChanged.addListener(() => {
     console.error("Failed to refresh menu on window focus change", error);
   });
 });
+
+if (chrome.contextMenus.onShown?.addListener) {
+  chrome.contextMenus.onShown.addListener((_info, tab) => {
+    const refreshPromise = tab?.id ? scheduleMenuRefreshForTab(tab) : refreshMenusForActiveTab();
+    refreshPromise
+      .then(() => {
+        if (typeof chrome.contextMenus.refresh === "function") {
+          chrome.contextMenus.refresh();
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to refresh menu when context menu is shown", error);
+      });
+  });
+}
 
 chrome.contextMenus.onClicked.addListener((info, clickedTab) => {
   if (info.menuItemId === COPY_CURRENT_SESSION_MENU_ID) {
