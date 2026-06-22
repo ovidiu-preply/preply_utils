@@ -418,21 +418,7 @@ async function focusTab(tab) {
     return { ok: true };
   }
 
-  // Fallback: open same URL in currently visible workspace/window.
-  const activeTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  const activeTab = activeTabs[0];
-  const windowId = activeTab?.windowId;
-  if (!tab.url || typeof windowId !== "number") {
-    return { ok: false, reason: "tab-remains-hidden" };
-  }
-
-  await chrome.tabs.create({
-    windowId,
-    url: tab.url,
-    active: true
-  });
-
-  return { ok: true, reason: "opened-visible-copy" };
+  return { ok: false, reason: "tab-remains-hidden" };
 }
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -517,10 +503,6 @@ chrome.contextMenus.onClicked.addListener((info, clickedTab) => {
         const result = await focusTab(sourceTab);
         if (!result.ok) {
           console.warn(`Failed to focus source tab: ${result.reason}`);
-        } else if (result.reason === "opened-visible-copy") {
-          console.warn(`${LOG_PREFIX} source tab hidden, opened visible copy`, {
-            sourceTabId: sourceTab.id
-          });
         }
       })
       .catch((error) => {
