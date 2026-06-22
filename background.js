@@ -1,4 +1,5 @@
 const ROOT_MENU_ID = "bring-session-from-root";
+const COPY_CURRENT_SESSION_MENU_ID = "copy-current-tab-session-id";
 const SESSION_COOKIE_NAME = "sessionid";
 const LOG_PREFIX = "[SessionCopier]";
 
@@ -70,12 +71,26 @@ async function ensureRootMenu() {
     contexts: ["page"],
     visible: false
   });
+  await chrome.contextMenus.create({
+    id: COPY_CURRENT_SESSION_MENU_ID,
+    title: "Copy current tab session id",
+    contexts: ["page"],
+    visible: false
+  });
 }
 
 async function rebuildSourceMenus(currentTab) {
   await ensureRootMenu();
 
-  if (!currentTab.id || !currentTab.url || !isSupportedTabUrl(currentTab.url)) {
+  const isCurrentTabSupported =
+    !!currentTab.id && !!currentTab.url && isSupportedTabUrl(currentTab.url);
+
+  await chrome.contextMenus.update(COPY_CURRENT_SESSION_MENU_ID, {
+    visible: isCurrentTabSupported,
+    enabled: isCurrentTabSupported
+  });
+
+  if (!isCurrentTabSupported) {
     return;
   }
 
@@ -274,6 +289,55 @@ async function copySessionCookie(sourceTab, targetTab) {
   return { ok: true };
 }
 
+async function copyTextToClipboardOnTab(tabId, text) {
+  const injectionResults = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: async (value) => {
+      try {
+        await navigator.clipboard.writeText(value);
+        return true;
+      } catch (_error) {
+        try {
+          const textarea = document.createElement("textarea");
+          textarea.value = value;
+          textarea.style.position = "fixed";
+          textarea.style.left = "-9999px";
+          textarea.style.opacity = "0";
+          document.body.appendChild(textarea);
+          textarea.focus();
+          textarea.select();
+          const copied = document.execCommand("copy");
+          textarea.remove();
+          return copied;
+        } catch (_fallbackError) {
+          return false;
+        }
+      }
+    },
+    args: [text]
+  });
+
+  return Boolean(injectionResults?.[0]?.result);
+}
+
+async function copyCurrentTabSessionIdToClipboard(tab) {
+  if (!tab.id || !tab.url || !isSupportedTabUrl(tab.url)) {
+    return { ok: false, reason: "unsupported-or-missing-tab-url" };
+  }
+
+  const sourceCookie = await getSessionCookieForSourceUrl(tab.url);
+  if (!sourceCookie?.value) {
+    return { ok: false, reason: "source-cookie-missing" };
+  }
+
+  const copied = await copyTextToClipboardOnTab(tab.id, sourceCookie.value);
+  if (!copied) {
+    return { ok: false, reason: "clipboard-copy-failed" };
+  }
+
+  return { ok: true };
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   ensureRootMenu()
     .then(() => refreshMenusForActiveTab())
@@ -320,6 +384,30 @@ chrome.windows.onFocusChanged.addListener(() => {
 });
 
 chrome.contextMenus.onClicked.addListener((info, clickedTab) => {
+  if (info.menuItemId === COPY_CURRENT_SESSION_MENU_ID) {
+    resolveTargetTab(clickedTab)
+      .then(async (maybeTargetTab) => {
+        const targetTab = maybeTargetTab?.id ? await getTabOrNull(maybeTargetTab.id) : null;
+        if (!targetTab) {
+          console.warn("Cannot copy sessionid to clipboard: target tab closed.");
+          return;
+        }
+
+        const result = await copyCurrentTabSessionIdToClipboard(targetTab);
+        if (!result.ok) {
+          console.warn(`Session id clipboard copy skipped: ${result.reason}`);
+        } else {
+          console.warn(`${LOG_PREFIX} copied session id to clipboard`, {
+            targetTabId: targetTab.id
+          });
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to copy current tab session id", error);
+      });
+    return;
+  }
+
   const sourceTabId = sourceTabIdFromMenuItem(info.menuItemId);
   if (!sourceTabId) {
     return;
