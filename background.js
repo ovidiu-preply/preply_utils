@@ -201,21 +201,36 @@ async function getTabOrNull(tabId) {
   }
 }
 
-async function getSessionCookieForSourceUrl(sourceUrl) {
+async function getCookieStoreIdForTabId(tabId) {
+  const cookieStores = await chrome.cookies.getAllCookieStores();
+  const store = cookieStores.find((entry) => entry.tabIds.includes(tabId));
+  return store?.id ?? null;
+}
+
+async function getSessionCookieForSourceTab(sourceTab) {
+  if (!sourceTab.id || !sourceTab.url) {
+    return null;
+  }
+
+  const sourceStoreId = await getCookieStoreIdForTabId(sourceTab.id);
   const directCookie = await chrome.cookies.get({
-    url: sourceUrl,
-    name: SESSION_COOKIE_NAME
+    url: sourceTab.url,
+    name: SESSION_COOKIE_NAME,
+    ...(sourceStoreId ? { storeId: sourceStoreId } : {})
   });
   if (directCookie) {
     return directCookie;
   }
 
-  const sourceParsedUrl = parseUrl(sourceUrl);
+  const sourceParsedUrl = parseUrl(sourceTab.url);
   if (!sourceParsedUrl) {
     return null;
   }
 
-  const allByName = await chrome.cookies.getAll({ name: SESSION_COOKIE_NAME });
+  const allByName = await chrome.cookies.getAll({
+    name: SESSION_COOKIE_NAME,
+    ...(sourceStoreId ? { storeId: sourceStoreId } : {})
+  });
   const sourceHost = normalizeHost(sourceParsedUrl.hostname);
   const anyForHost = allByName.find(
     (cookie) => cookie.domain && isCookieDomainCompatible(cookie.domain, sourceHost)
@@ -223,21 +238,30 @@ async function getSessionCookieForSourceUrl(sourceUrl) {
   return anyForHost ?? allByName[0] ?? null;
 }
 
-async function getSessionCookieForTargetUrl(targetUrl) {
+async function getSessionCookieForTargetTab(targetTab) {
+  if (!targetTab.id || !targetTab.url) {
+    return null;
+  }
+
+  const targetStoreId = await getCookieStoreIdForTabId(targetTab.id);
   const directCookie = await chrome.cookies.get({
-    url: targetUrl,
-    name: SESSION_COOKIE_NAME
+    url: targetTab.url,
+    name: SESSION_COOKIE_NAME,
+    ...(targetStoreId ? { storeId: targetStoreId } : {})
   });
   if (directCookie) {
     return directCookie;
   }
 
-  const targetParsedUrl = parseUrl(targetUrl);
+  const targetParsedUrl = parseUrl(targetTab.url);
   if (!targetParsedUrl) {
     return null;
   }
 
-  const allByName = await chrome.cookies.getAll({ name: SESSION_COOKIE_NAME });
+  const allByName = await chrome.cookies.getAll({
+    name: SESSION_COOKIE_NAME,
+    ...(targetStoreId ? { storeId: targetStoreId } : {})
+  });
   const targetHost = normalizeHost(targetParsedUrl.hostname);
   const candidates = allByName.filter(
     (cookie) => cookie.domain && isCookieDomainCompatible(cookie.domain, targetHost)
@@ -281,7 +305,7 @@ async function copySessionCookie(sourceTab, targetTab) {
     return { ok: false, reason: "missing-tab-url" };
   }
 
-  const sourceCookie = await getSessionCookieForSourceUrl(sourceTab.url);
+  const sourceCookie = await getSessionCookieForSourceTab(sourceTab);
 
   if (!sourceCookie) {
     console.warn(`${LOG_PREFIX} source cookie missing`, {
@@ -300,7 +324,7 @@ async function copySessionCookie(sourceTab, targetTab) {
     return { ok: false, reason: "invalid-target-url" };
   }
 
-  const targetCookie = await getSessionCookieForTargetUrl(targetTab.url);
+  const targetCookie = await getSessionCookieForTargetTab(targetTab);
   if (!targetCookie) {
     console.warn(`${LOG_PREFIX} target cookie missing`, {
       targetTabId: targetTab.id,
@@ -395,7 +419,7 @@ async function copyCurrentTabSessionIdToClipboard(tab) {
     return { ok: false, reason: "unsupported-or-missing-tab-url" };
   }
 
-  const sourceCookie = await getSessionCookieForSourceUrl(tab.url);
+  const sourceCookie = await getSessionCookieForSourceTab(tab);
   if (!sourceCookie?.value) {
     return { ok: false, reason: "source-cookie-missing" };
   }
