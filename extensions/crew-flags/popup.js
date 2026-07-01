@@ -1,6 +1,8 @@
-const STORAGE_KEY = "trackedFlagIdsByDomain";
+const TRACKED_IDS_STORAGE_KEY = "trackedFlagIdsByDomain";
+const FLAG_CACHE_STORAGE_KEY = "flagInfoByDomain";
 const domainUiByDomain = new Map();
 let trackedFlagIdsByDomain = {};
+let flagInfoByDomain = {};
 
 function normalizeText(value) {
   return (value || "").replace(/\s+/g, " ").trim();
@@ -49,6 +51,65 @@ function sanitizeTrackedIdsByDomain(rawMap) {
     }
     sanitized[domain] = sanitizeIds(ids);
   }
+  return sanitized;
+}
+
+function sanitizeFlagInfo(rawInfo) {
+  if (!rawInfo || typeof rawInfo !== "object") {
+    return null;
+  }
+
+  const allowedStatuses = new Set(["ok", "not_found", "fetch_failed"]);
+  const status = typeof rawInfo.status === "string" ? rawInfo.status : "";
+  if (!allowedStatuses.has(status)) {
+    return null;
+  }
+
+  const sanitized = { status };
+  if (status === "ok") {
+    sanitized.flagName = typeof rawInfo.flagName === "string" ? rawInfo.flagName : "";
+    sanitized.everyone = typeof rawInfo.everyone === "string" ? rawInfo.everyone : "";
+    sanitized.percent = typeof rawInfo.percent === "string" ? rawInfo.percent : "";
+    sanitized.audiencePercent =
+      typeof rawInfo.audiencePercent === "string" ? rawInfo.audiencePercent : "";
+  } else if (status === "fetch_failed") {
+    sanitized.error =
+      typeof rawInfo.error === "string" && rawInfo.error.trim() !== ""
+        ? rawInfo.error
+        : "Unknown error";
+  }
+
+  return sanitized;
+}
+
+function sanitizeFlagInfoByDomain(rawMap) {
+  const sanitized = {};
+  if (!rawMap || typeof rawMap !== "object") {
+    return sanitized;
+  }
+
+  for (const [domain, byId] of Object.entries(rawMap)) {
+    if (typeof domain !== "string" || domain.trim() === "" || !byId || typeof byId !== "object") {
+      continue;
+    }
+
+    const sanitizedById = {};
+    for (const [rawId, rawInfo] of Object.entries(byId)) {
+      const id = normalizeId(Number.parseInt(rawId, 10));
+      if (id === null) {
+        continue;
+      }
+
+      const info = sanitizeFlagInfo(rawInfo);
+      if (!info) {
+        continue;
+      }
+      sanitizedById[id] = info;
+    }
+
+    sanitized[domain] = sanitizedById;
+  }
+
   return sanitized;
 }
 
@@ -212,6 +273,12 @@ function createStatusBadge(status) {
     return badge;
   }
 
+  if (status === "idle") {
+    badge.textContent = "NOT LOADED";
+    badge.style.color = "#6b7280";
+    return badge;
+  }
+
   badge.textContent = "FETCH FAILED";
   badge.style.color = "#c62828";
   return badge;
@@ -228,8 +295,11 @@ async function removeTrackedFlag(domain, id) {
   }
 
   trackedFlagIdsByDomain[domain] = existingIds.filter((trackedId) => trackedId !== id);
+  if (flagInfoByDomain[domain] && typeof flagInfoByDomain[domain] === "object") {
+    delete flagInfoByDomain[domain][id];
+  }
   try {
-    await saveTrackedIds();
+    await Promise.all([saveTrackedIds(), saveFlagInfoCache()]);
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown error";
@@ -244,8 +314,9 @@ async function removeTrackedDomain(domain) {
   }
 
   delete trackedFlagIdsByDomain[domain];
+  delete flagInfoByDomain[domain];
   try {
-    await saveTrackedIds();
+    await Promise.all([saveTrackedIds(), saveFlagInfoCache()]);
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown error";
@@ -313,7 +384,16 @@ function renderDomainSection(domain) {
       }
     })();
   });
-  domainHeaderRow.append(removeDomainButton);
+
+  const refreshButton = document.createElement("button");
+  refreshButton.className = "refresh-domain-button";
+  refreshButton.type = "button";
+  refreshButton.textContent = "Refresh";
+  refreshButton.addEventListener("click", () => {
+    void refreshDomainFlags(domain);
+  });
+
+  domainHeaderRow.append(refreshButton, removeDomainButton);
   domainSection.append(domainHeaderRow);
 
   const { row: trackRow, input: trackInput } = createTrackRow(domain);
@@ -324,7 +404,7 @@ function renderDomainSection(domain) {
   domainSection.append(domainFlagsList);
 
   fieldsList.append(domainSection);
-  domainUiByDomain.set(domain, { trackInput, domainFlagsList });
+  domainUiByDomain.set(domain, { trackInput, domainFlagsList, refreshButton });
 }
 
 function getDomainFlagsList(domain) {
@@ -381,6 +461,8 @@ function renderFlagBlock(flagInfo) {
 
   if (status === "loading") {
     subList.append(createValueLine("Status", "Loading..."));
+  } else if (status === "idle") {
+    subList.append(createValueLine("Status", "Not loaded. Click Refresh for this domain."));
   } else if (status === "fetch_failed") {
     subList.append(createValueLine("Error", flagInfo.error));
   } else if (status === "ok") {
@@ -399,7 +481,11 @@ function renderFlagBlock(flagInfo) {
 }
 
 async function saveTrackedIds() {
-  await setInStorage({ [STORAGE_KEY]: trackedFlagIdsByDomain });
+  await setInStorage({ [TRACKED_IDS_STORAGE_KEY]: trackedFlagIdsByDomain });
+}
+
+async function saveFlagInfoCache() {
+  await setInStorage({ [FLAG_CACHE_STORAGE_KEY]: flagInfoByDomain });
 }
 
 function getTrackedIdsForDomain(domain) {
@@ -412,6 +498,52 @@ async function fetchAndRenderFlag(domain, id) {
   renderFlagBlock({ domain, id, status: "loading" });
   const info = await fetchFlagInfo(domain, id);
   renderFlagBlock(info);
+  if (!flagInfoByDomain[domain] || typeof flagInfoByDomain[domain] !== "object") {
+    flagInfoByDomain[domain] = {};
+  }
+  flagInfoByDomain[domain][id] = sanitizeFlagInfo(info);
+  return info;
+}
+
+function renderCachedFlag(domain, id) {
+  const domainFlags = flagInfoByDomain[domain];
+  const cachedInfo =
+    domainFlags && typeof domainFlags === "object" ? sanitizeFlagInfo(domainFlags[id]) : null;
+
+  if (!cachedInfo) {
+    renderFlagBlock({ domain, id, status: "idle" });
+    return;
+  }
+
+  renderFlagBlock({ domain, id, ...cachedInfo });
+}
+
+async function refreshDomainFlags(domain) {
+  setError("");
+  const ui = domainUiByDomain.get(domain);
+  if (!ui) {
+    return;
+  }
+
+  const ids = getTrackedIdsForDomain(domain);
+  if (ids.length === 0) {
+    return;
+  }
+
+  ui.refreshButton.disabled = true;
+  const initialLabel = ui.refreshButton.textContent;
+  ui.refreshButton.textContent = "Refreshing...";
+
+  try {
+    await Promise.all(ids.map((id) => fetchAndRenderFlag(domain, id)));
+    await saveFlagInfoCache();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    setError(`Cannot refresh ${domain}: ${message}`);
+  } finally {
+    ui.refreshButton.disabled = false;
+    ui.refreshButton.textContent = initialLabel || "Refresh";
+  }
 }
 
 async function handleTrackClick(domain) {
@@ -443,6 +575,12 @@ async function handleTrackClick(domain) {
 
   ui.trackInput.value = "";
   await fetchAndRenderFlag(domain, id);
+  try {
+    await saveFlagInfoCache();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    setError(`Cannot save flag cache: ${message}`);
+  }
 }
 
 async function fetchFlagInfo(domain, flagId) {
@@ -501,12 +639,21 @@ async function loadFlagInfo() {
   let currentDomain = "";
 
   try {
-    const fromStorage = await getFromStorage(STORAGE_KEY);
+    const fromStorage = await getFromStorage(TRACKED_IDS_STORAGE_KEY);
     trackedFlagIdsByDomain = sanitizeTrackedIdsByDomain(fromStorage);
   } catch (error) {
     trackedFlagIdsByDomain = sanitizeTrackedIdsByDomain(null);
     const message = error instanceof Error ? error.message : "unknown error";
     setError(`Cannot read tracked IDs: ${message}`);
+  }
+
+  try {
+    const fromStorage = await getFromStorage(FLAG_CACHE_STORAGE_KEY);
+    flagInfoByDomain = sanitizeFlagInfoByDomain(fromStorage);
+  } catch (error) {
+    flagInfoByDomain = sanitizeFlagInfoByDomain(null);
+    const message = error instanceof Error ? error.message : "unknown error";
+    setError(`Cannot read flag cache: ${message}`);
   }
 
   try {
@@ -516,17 +663,14 @@ async function loadFlagInfo() {
     setError(`Cannot read current tab: ${message}`);
   }
 
-  const fetchTasks = [];
   const domains = getDomainsForRender(trackedFlagIdsByDomain, currentDomain);
   for (const domain of domains) {
     renderDomainSection(domain);
     const ids = getTrackedIdsForDomain(domain);
     for (const id of ids) {
-      fetchTasks.push(fetchAndRenderFlag(domain, id));
+      renderCachedFlag(domain, id);
     }
   }
-
-  await Promise.all(fetchTasks);
 }
 
 void loadFlagInfo();
