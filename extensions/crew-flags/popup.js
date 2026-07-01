@@ -259,12 +259,13 @@ function clearFields() {
 
 function createValueLine(label, value) {
   const line = document.createElement("li");
+  line.className = "field-row";
   const labelElement = document.createElement("div");
   labelElement.className = "label";
   labelElement.textContent = label;
 
   const valueElement = document.createElement("div");
-  valueElement.className = "value";
+  valueElement.className = "value value-badge";
   valueElement.textContent = normalizeText(value) || "-";
 
   line.append(labelElement, valueElement);
@@ -311,6 +312,39 @@ function createContextBadge(label) {
   badge.className = "context-badge";
   badge.textContent = label;
   return badge;
+}
+
+function makeIconButton(button, { label, iconSrc, size = 14 }) {
+  button.setAttribute("aria-label", label);
+  button.title = label;
+
+  const icon = document.createElement("img");
+  icon.src = iconSrc;
+  icon.alt = "";
+  icon.width = size;
+  icon.height = size;
+  icon.style.display = "block";
+  button.append(icon);
+}
+
+function makeDeleteIconButton(button, label) {
+  makeIconButton(button, { label, iconSrc: "delete-icon.png" });
+}
+
+function makeRefreshIconButton(button, label) {
+  makeIconButton(button, { label, iconSrc: "refresh-icon.png" });
+}
+
+function makeTrackIconButton(button, label) {
+  makeIconButton(button, { label, iconSrc: "track-icon.png" });
+}
+
+function setRefreshButtonLoadingState(button, isLoading) {
+  button.disabled = isLoading;
+  button.classList.toggle("is-loading", isLoading);
+  const label = isLoading ? "Refreshing" : "Refresh";
+  button.setAttribute("aria-label", label);
+  button.title = label;
 }
 
 function getFlagKey(flagInfo) {
@@ -368,7 +402,7 @@ function createTrackRow(domain) {
   const button = document.createElement("button");
   button.className = "track-button";
   button.type = "button";
-  button.textContent = "Track";
+  makeTrackIconButton(button, "Track flag");
   button.addEventListener("click", () => {
     void handleTrackClick(domain);
   });
@@ -406,7 +440,7 @@ function renderDomainSection(domain) {
   const removeDomainButton = document.createElement("button");
   removeDomainButton.className = "remove-domain-button";
   removeDomainButton.type = "button";
-  removeDomainButton.textContent = "Remove domain";
+  makeDeleteIconButton(removeDomainButton, "Remove domain");
   removeDomainButton.addEventListener("click", () => {
     void (async () => {
       setError("");
@@ -421,7 +455,7 @@ function renderDomainSection(domain) {
   const refreshButton = document.createElement("button");
   refreshButton.className = "refresh-domain-button";
   refreshButton.type = "button";
-  refreshButton.textContent = "Refresh";
+  makeRefreshIconButton(refreshButton, "Refresh");
   refreshButton.addEventListener("click", () => {
     void refreshDomainFlags(domain);
   });
@@ -459,15 +493,14 @@ function renderFlagBlock(flagInfo) {
   block.setAttribute("data-flag-key", flagKey);
 
   const titleRow = document.createElement("div");
+  titleRow.className = "flag-title-row";
 
   const title = document.createElement("a");
-  title.className = "value";
+  title.className = "value flag-title";
   title.href = targetUrl;
   title.target = "_blank";
   title.rel = "noopener noreferrer";
   title.textContent = `Flag ID ${flagInfo.id}`;
-  title.style.display = "inline-block";
-  title.style.marginBottom = "8px";
 
   const status = flagInfo.status || "fetch_failed";
   const statusBadge = createStatusBadge(status);
@@ -479,7 +512,7 @@ function renderFlagBlock(flagInfo) {
   const removeButton = document.createElement("button");
   removeButton.className = "remove-button";
   removeButton.type = "button";
-  removeButton.textContent = "Remove";
+  makeDeleteIconButton(removeButton, "Remove");
   removeButton.addEventListener("click", () => {
     void (async () => {
       setError("");
@@ -491,9 +524,10 @@ function renderFlagBlock(flagInfo) {
   });
   titleRow.append(removeButton);
   block.append(titleRow);
+  block.classList.add("flag-card");
 
   const subList = document.createElement("ul");
-  subList.style.marginBottom = "14px";
+  subList.className = "flag-fields-list";
 
   if (status === "loading") {
     subList.append(createValueLine("Status", "Loading..."));
@@ -566,9 +600,7 @@ async function refreshDomainFlags(domain) {
     return;
   }
 
-  ui.refreshButton.disabled = true;
-  const initialLabel = ui.refreshButton.textContent;
-  ui.refreshButton.textContent = "Refreshing...";
+  setRefreshButtonLoadingState(ui.refreshButton, true);
 
   try {
     await Promise.all(ids.map((id) => fetchAndRenderFlag(domain, id)));
@@ -577,8 +609,7 @@ async function refreshDomainFlags(domain) {
     const message = error instanceof Error ? error.message : "unknown error";
     setError(`Cannot refresh ${domain}: ${message}`);
   } finally {
-    ui.refreshButton.disabled = false;
-    ui.refreshButton.textContent = initialLabel || "Refresh";
+    setRefreshButtonLoadingState(ui.refreshButton, false);
   }
 }
 
