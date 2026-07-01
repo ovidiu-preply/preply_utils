@@ -195,13 +195,16 @@ async function removeTrackedDomain(domain) {
 }
 
 async function fetchAndRenderFlag(domain, id) {
-  renderFlagBlock({ domain, id, status: "loading" }, { onRemoveFlag: handleRemoveFlag });
+  renderFlagBlock(
+    { domain, id, status: "loading" },
+    { onRemoveFlag: handleRemoveFlag, onReorderFlags: handleReorderFlags }
+  );
   const info = await fetchFlagInfo(domain, id);
   const fetchedInfo = {
     ...info,
     lastFetchedAt: Date.now()
   };
-  renderFlagBlock(fetchedInfo, { onRemoveFlag: handleRemoveFlag });
+  renderFlagBlock(fetchedInfo, { onRemoveFlag: handleRemoveFlag, onReorderFlags: handleReorderFlags });
   if (!state.flagInfoByDomain[domain] || typeof state.flagInfoByDomain[domain] !== "object") {
     state.flagInfoByDomain[domain] = {};
   }
@@ -215,11 +218,17 @@ function renderCachedFlag(domain, id) {
     domainFlags && typeof domainFlags === "object" ? sanitizeFlagInfo(domainFlags[id]) : null;
 
   if (!cachedInfo) {
-    renderFlagBlock({ domain, id, status: "idle" }, { onRemoveFlag: handleRemoveFlag });
+    renderFlagBlock(
+      { domain, id, status: "idle" },
+      { onRemoveFlag: handleRemoveFlag, onReorderFlags: handleReorderFlags }
+    );
     return;
   }
 
-  renderFlagBlock({ domain, id, ...cachedInfo }, { onRemoveFlag: handleRemoveFlag });
+  renderFlagBlock(
+    { domain, id, ...cachedInfo },
+    { onRemoveFlag: handleRemoveFlag, onReorderFlags: handleReorderFlags }
+  );
 }
 
 async function refreshDomainFlags(domain) {
@@ -301,6 +310,32 @@ async function handleRemoveDomain(domain, domainSection) {
   }
 }
 
+async function handleReorderFlags(domain, orderedIds) {
+  const currentIds = getTrackedIdsForDomain(domain);
+  if (orderedIds.length !== currentIds.length) {
+    return;
+  }
+  const orderedSet = new Set(orderedIds);
+  if (orderedSet.size !== currentIds.length) {
+    return;
+  }
+  if (currentIds.some((id) => !orderedSet.has(id))) {
+    return;
+  }
+  const isSameOrder = currentIds.every((id, index) => id === orderedIds[index]);
+  if (isSameOrder) {
+    return;
+  }
+
+  state.trackedFlagIdsByDomain[domain] = orderedIds;
+  try {
+    await saveTrackedIds();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    setError(`Cannot reorder tracked IDs: ${message}`);
+  }
+}
+
 async function loadFlagInfo() {
   setError("");
   clearFields();
@@ -356,7 +391,8 @@ async function loadFlagInfo() {
     renderDomainSection(domain, {
       onRemoveDomain: handleRemoveDomain,
       onRefreshDomain: refreshDomainFlags,
-      onTrackClick: handleTrackClick
+      onTrackClick: handleTrackClick,
+      onReorderFlags: handleReorderFlags
     });
     const ids = getTrackedIdsForDomain(domain);
     for (const id of ids) {

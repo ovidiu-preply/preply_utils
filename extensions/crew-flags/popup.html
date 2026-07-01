@@ -294,6 +294,20 @@
       .flag-card {
         margin-top: 4px;
         position: relative;
+        cursor: grab;
+      }
+
+      .flag-card:active {
+        cursor: grabbing;
+      }
+
+      .flag-card.flag-card-dragging {
+        opacity: 0.55;
+      }
+
+      .flag-card.flag-card-drop-target {
+        outline: 2px dashed #60a5fa;
+        outline-offset: 4px;
       }
 
       .flag-card + .flag-card {

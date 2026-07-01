@@ -219,7 +219,7 @@ function createTrackRow(domain, onTrackClick) {
 }
 
 export function renderDomainSection(domain, callbacks) {
-  const { onRemoveDomain, onRefreshDomain, onTrackClick } = callbacks;
+  const { onRemoveDomain, onRefreshDomain, onTrackClick, onReorderFlags } = callbacks;
   const fieldsList = getFieldsList();
   if (!fieldsList) {
     return;
@@ -262,6 +262,19 @@ export function renderDomainSection(domain, callbacks) {
 
   const domainFlagsList = document.createElement("ul");
   domainFlagsList.setAttribute("data-domain-flags", domain);
+  domainFlagsList.addEventListener("dragover", (event) => {
+    event.preventDefault();
+  });
+  domainFlagsList.addEventListener("drop", (event) => {
+    event.preventDefault();
+    const draggingBlock = domainFlagsList.querySelector(".flag-card-dragging");
+    if (!draggingBlock) {
+      return;
+    }
+    domainFlagsList.append(draggingBlock);
+    clearFlagDropTargets();
+    notifyFlagsReordered(domain, domainFlagsList, onReorderFlags);
+  });
   domainSection.append(domainFlagsList);
 
   fieldsList.append(domainSection);
@@ -273,8 +286,36 @@ function getDomainFlagsList(domain) {
   return ui ? ui.domainFlagsList : null;
 }
 
+function clearFlagDropTargets() {
+  const dropTargets = document.querySelectorAll(".flag-card-drop-target");
+  for (const dropTarget of dropTargets) {
+    dropTarget.classList.remove("flag-card-drop-target");
+  }
+}
+
+function getOrderedFlagIds(domainFlagsList) {
+  const idElements = domainFlagsList.querySelectorAll("[data-flag-id]");
+  const ids = [];
+  for (const idElement of idElements) {
+    const rawId = idElement.getAttribute("data-flag-id");
+    const id = Number.parseInt(rawId || "", 10);
+    if (Number.isInteger(id) && id > 0) {
+      ids.push(id);
+    }
+  }
+  return ids;
+}
+
+function notifyFlagsReordered(domain, domainFlagsList, onReorderFlags) {
+  if (typeof onReorderFlags !== "function") {
+    return;
+  }
+  const orderedIds = getOrderedFlagIds(domainFlagsList);
+  void onReorderFlags(domain, orderedIds);
+}
+
 export function renderFlagBlock(flagInfo, callbacks) {
-  const { onRemoveFlag } = callbacks;
+  const { onRemoveFlag, onReorderFlags } = callbacks;
   const domainFlagsList = getDomainFlagsList(flagInfo.domain);
   if (!domainFlagsList) {
     return;
@@ -286,6 +327,42 @@ export function renderFlagBlock(flagInfo, callbacks) {
   const block = existingBlock || document.createElement("li");
   block.replaceChildren();
   block.setAttribute("data-flag-key", flagKey);
+  block.setAttribute("data-flag-id", String(flagInfo.id));
+  block.draggable = true;
+  block.ondragstart = (event) => {
+    block.classList.add("flag-card-dragging");
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", flagKey);
+    }
+  };
+  block.ondragend = () => {
+    block.classList.remove("flag-card-dragging");
+    clearFlagDropTargets();
+  };
+  block.ondragover = (event) => {
+    const draggingBlock = domainFlagsList.querySelector(".flag-card-dragging");
+    if (!draggingBlock || draggingBlock === block) {
+      return;
+    }
+    event.preventDefault();
+    block.classList.add("flag-card-drop-target");
+    const midpoint = block.getBoundingClientRect().top + block.offsetHeight / 2;
+    if (event.clientY < midpoint) {
+      domainFlagsList.insertBefore(draggingBlock, block);
+      return;
+    }
+    domainFlagsList.insertBefore(draggingBlock, block.nextElementSibling);
+  };
+  block.ondragleave = () => {
+    block.classList.remove("flag-card-drop-target");
+  };
+  block.ondrop = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    block.classList.remove("flag-card-drop-target");
+    notifyFlagsReordered(flagInfo.domain, domainFlagsList, onReorderFlags);
+  };
 
   const titleRow = document.createElement("div");
   titleRow.className = "flag-title-row";
