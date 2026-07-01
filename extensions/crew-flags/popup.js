@@ -1,4 +1,3 @@
-const DOMAINS = ["crew.stage39.preply.org", "crew.preply.com"];
 const STORAGE_KEY = "trackedFlagIdsByDomain";
 const domainUiByDomain = new Map();
 let trackedFlagIdsByDomain = {};
@@ -40,14 +39,54 @@ function sanitizeIds(ids) {
 
 function sanitizeTrackedIdsByDomain(rawMap) {
   const sanitized = {};
-  for (const domain of DOMAINS) {
-    const rawIds =
-      rawMap && typeof rawMap === "object"
-        ? rawMap[domain]
-        : [];
-    sanitized[domain] = sanitizeIds(rawIds);
+  if (!rawMap || typeof rawMap !== "object") {
+    return sanitized;
+  }
+
+  for (const [domain, ids] of Object.entries(rawMap)) {
+    if (typeof domain !== "string" || domain.trim() === "") {
+      continue;
+    }
+    sanitized[domain] = sanitizeIds(ids);
   }
   return sanitized;
+}
+
+function isSupportedDomain(domain) {
+  return domain === "crew.preply.com" || /^crew\.stage\d+\.preply\.org$/i.test(domain);
+}
+
+function extractDomainFromUrl(url) {
+  try {
+    return new URL(url).hostname || "";
+  } catch {
+    return "";
+  }
+}
+
+function getCurrentTabDomain() {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+
+      const [activeTab] = tabs;
+      const url = activeTab && typeof activeTab.url === "string" ? activeTab.url : "";
+      resolve(extractDomainFromUrl(url));
+    });
+  });
+}
+
+function getDomainsForRender(storedMap, currentDomain) {
+  const storedDomains = Object.keys(storedMap);
+  if (!isSupportedDomain(currentDomain)) {
+    return storedDomains;
+  }
+
+  const filteredStoredDomains = storedDomains.filter((domain) => domain !== currentDomain);
+  return [currentDomain, ...filteredStoredDomains];
 }
 
 function getFromStorage(key) {
@@ -199,6 +238,22 @@ async function removeTrackedFlag(domain, id) {
   }
 }
 
+async function removeTrackedDomain(domain) {
+  if (!Object.prototype.hasOwnProperty.call(trackedFlagIdsByDomain, domain)) {
+    return true;
+  }
+
+  delete trackedFlagIdsByDomain[domain];
+  try {
+    await saveTrackedIds();
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    setError(`Cannot remove domain: ${message}`);
+    return false;
+  }
+}
+
 function createTrackRow(domain) {
   const row = document.createElement("div");
   row.className = "track-row";
@@ -236,10 +291,30 @@ function renderDomainSection(domain) {
   }
 
   const domainSection = document.createElement("li");
+  const domainHeaderRow = document.createElement("div");
+  domainHeaderRow.className = "domain-header-row";
+
   const domainTitle = document.createElement("div");
   domainTitle.className = "value domain-title";
   domainTitle.textContent = domain;
-  domainSection.append(domainTitle);
+  domainHeaderRow.append(domainTitle);
+
+  const removeDomainButton = document.createElement("button");
+  removeDomainButton.className = "remove-domain-button";
+  removeDomainButton.type = "button";
+  removeDomainButton.textContent = "Remove domain";
+  removeDomainButton.addEventListener("click", () => {
+    void (async () => {
+      setError("");
+      const wasRemoved = await removeTrackedDomain(domain);
+      if (wasRemoved) {
+        domainUiByDomain.delete(domain);
+        domainSection.remove();
+      }
+    })();
+  });
+  domainHeaderRow.append(removeDomainButton);
+  domainSection.append(domainHeaderRow);
 
   const { row: trackRow, input: trackInput } = createTrackRow(domain);
   domainSection.append(trackRow);
@@ -423,6 +498,7 @@ async function loadFlagInfo() {
   setError("");
   clearFields();
   domainUiByDomain.clear();
+  let currentDomain = "";
 
   try {
     const fromStorage = await getFromStorage(STORAGE_KEY);
@@ -433,8 +509,16 @@ async function loadFlagInfo() {
     setError(`Cannot read tracked IDs: ${message}`);
   }
 
+  try {
+    currentDomain = await getCurrentTabDomain();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    setError(`Cannot read current tab: ${message}`);
+  }
+
   const fetchTasks = [];
-  for (const domain of DOMAINS) {
+  const domains = getDomainsForRender(trackedFlagIdsByDomain, currentDomain);
+  for (const domain of domains) {
     renderDomainSection(domain);
     const ids = getTrackedIdsForDomain(domain);
     for (const id of ids) {

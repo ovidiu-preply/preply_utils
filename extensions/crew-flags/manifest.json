@@ -4,7 +4,8 @@
   "description": "Minimal extension active on Crew stage/prod domains.",
   "version": "0.1.0",
   "permissions": [
-    "storage"
+    "storage",
+    "tabs"
   ],
   "host_permissions": [
     "https://crew.preply.com/*",
