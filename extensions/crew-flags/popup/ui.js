@@ -70,39 +70,6 @@ function createPercentagesLine(percent, audiencePercent) {
   return line;
 }
 
-function createStatusBadge(status) {
-  const badge = document.createElement("span");
-  badge.style.fontSize = "11px";
-  badge.style.fontWeight = "700";
-  badge.style.marginLeft = "8px";
-
-  if (status === "loading") {
-    badge.textContent = "LOADING";
-    badge.style.color = "#1565c0";
-    return badge;
-  }
-
-  if (status === "ok") {
-    return null;
-  }
-
-  if (status === "not_found") {
-    badge.textContent = "NOT FOUND";
-    badge.style.color = "#c62828";
-    return badge;
-  }
-
-  if (status === "idle") {
-    badge.textContent = "NOT LOADED";
-    badge.style.color = "#6b7280";
-    return badge;
-  }
-
-  badge.textContent = "FETCH FAILED";
-  badge.style.color = "#c62828";
-  return badge;
-}
-
 function createContextBadge(label) {
   const badge = document.createElement("span");
   badge.className = "context-badge";
@@ -120,6 +87,31 @@ function createFlagNameBadge(label) {
   badge.style.borderColor = "#5eead4";
   badge.textContent = label;
   return badge;
+}
+
+function createFlagErrorBadge(label) {
+  const badge = document.createElement("span");
+  badge.className = "value-badge value-badge-false";
+  badge.style.fontSize = "13px";
+  badge.style.marginRight = "6px";
+  badge.textContent = label;
+  return badge;
+}
+
+function getFlagErrorBadgeText(status) {
+  if (status === "not_found") {
+    return "NOT FOUND";
+  }
+  if (status === "fetch_failed") {
+    return "FETCH FAILED";
+  }
+  if (status === "idle") {
+    return "NOT LOADED";
+  }
+  if (status === "loading") {
+    return "LOADING";
+  }
+  return "FETCH FAILED";
 }
 
 function createIterationBadge(label, tooltip) {
@@ -236,6 +228,13 @@ function makeCopyIconButton(button, label) {
   makeIconButton(button, { label, iconSrc: "copy-icon.png", size: 13 });
 }
 
+function setDomainHeaderTriggerState(trigger, domain, isCollapsed) {
+  const action = isCollapsed ? "Expand" : "Collapse";
+  trigger.setAttribute("aria-label", `${action} ${domain}`);
+  trigger.title = `${action} ${domain}`;
+  trigger.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+}
+
 export function setRefreshButtonLoadingState(button, isLoading) {
   button.disabled = isLoading;
   button.classList.toggle("is-loading", isLoading);
@@ -246,6 +245,27 @@ export function setRefreshButtonLoadingState(button, isLoading) {
 
 export function getFlagKey(flagInfo) {
   return `${flagInfo.domain}::${flagInfo.id}`;
+}
+
+function formatDomainFlagCount(count) {
+  return `${count} flag${count === 1 ? "" : "s"}`;
+}
+
+function setDomainFlagCount(domain, count) {
+  const ui = state.domainUiByDomain.get(domain);
+  if (!ui || !(ui.domainCountBadge instanceof HTMLElement)) {
+    return;
+  }
+  ui.domainCountBadge.textContent = formatDomainFlagCount(count);
+}
+
+export function updateDomainFlagCount(domain) {
+  const ui = state.domainUiByDomain.get(domain);
+  if (!ui || !(ui.domainFlagsList instanceof HTMLElement)) {
+    return;
+  }
+  const count = ui.domainFlagsList.querySelectorAll("[data-flag-id]").length;
+  setDomainFlagCount(domain, count);
 }
 
 function createTrackRow(domain, onTrackClick) {
@@ -279,7 +299,14 @@ function createTrackRow(domain, onTrackClick) {
 }
 
 export function renderDomainSection(domain, callbacks) {
-  const { onRemoveDomain, onRefreshDomain, onTrackClick, onReorderFlags } = callbacks;
+  const {
+    onRemoveDomain,
+    onRefreshDomain,
+    onTrackClick,
+    onReorderFlags,
+    onToggleDomainCollapse,
+    isDomainCollapsed
+  } = callbacks;
   const fieldsList = getFieldsList();
   if (!fieldsList) {
     return;
@@ -289,11 +316,26 @@ export function renderDomainSection(domain, callbacks) {
   domainSection.classList.add("domain-card");
   const domainHeaderRow = document.createElement("div");
   domainHeaderRow.className = "domain-header-row";
+  domainHeaderRow.setAttribute("role", "button");
+  domainHeaderRow.tabIndex = 0;
 
   const domainTitle = document.createElement("div");
   domainTitle.className = "value domain-title";
   domainTitle.textContent = domain;
-  domainHeaderRow.append(domainTitle);
+  const domainCountBadge = document.createElement("span");
+  domainCountBadge.className = "domain-count-badge";
+  domainCountBadge.textContent = formatDomainFlagCount(0);
+
+  const collapseIndicator = document.createElement("span");
+  collapseIndicator.className = "domain-collapse-indicator";
+  collapseIndicator.setAttribute("aria-hidden", "true");
+  const collapseIndicatorIcon = document.createElement("img");
+  collapseIndicatorIcon.className = "domain-collapse-indicator-icon";
+  collapseIndicatorIcon.src = "domain-collapse-arrow-down.png";
+  collapseIndicatorIcon.alt = "";
+  collapseIndicator.append(collapseIndicatorIcon);
+
+  domainHeaderRow.append(collapseIndicator, domainTitle, domainCountBadge);
   if (domain === state.highlightedDomain) {
     domainHeaderRow.append(createContextBadge("Current page"));
   }
@@ -302,6 +344,9 @@ export function renderDomainSection(domain, callbacks) {
   removeDomainButton.className = "remove-domain-button";
   removeDomainButton.type = "button";
   makeDeleteIconButton(removeDomainButton, "Remove domain");
+  removeDomainButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
   removeDomainButton.addEventListener("click", () => {
     void onRemoveDomain(domain, domainSection);
   });
@@ -310,6 +355,9 @@ export function renderDomainSection(domain, callbacks) {
   refreshButton.className = "refresh-domain-button";
   refreshButton.type = "button";
   makeRefreshIconButton(refreshButton, "Refresh");
+  refreshButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
   refreshButton.addEventListener("click", () => {
     void onRefreshDomain(domain);
   });
@@ -337,8 +385,55 @@ export function renderDomainSection(domain, callbacks) {
   });
   domainSection.append(domainFlagsList);
 
+  const setCollapsed = (isCollapsed) => {
+    trackRow.toggleAttribute("hidden", isCollapsed);
+    domainFlagsList.toggleAttribute("hidden", isCollapsed);
+    domainSection.classList.toggle("domain-card-collapsed", isCollapsed);
+    collapseIndicator.classList.toggle("is-collapsed", isCollapsed);
+    setDomainHeaderTriggerState(domainHeaderRow, domain, isCollapsed);
+    const ui = state.domainUiByDomain.get(domain);
+    if (ui) {
+      ui.isCollapsed = isCollapsed;
+    }
+  };
+
+  const toggleCollapsedState = () => {
+    const ui = state.domainUiByDomain.get(domain);
+    if (!ui) {
+      return;
+    }
+    const nextCollapsed = !ui.isCollapsed;
+    ui.setCollapsed(nextCollapsed);
+    if (typeof onToggleDomainCollapse === "function") {
+      void onToggleDomainCollapse(domain, nextCollapsed);
+    }
+  };
+
+  domainHeaderRow.addEventListener("click", toggleCollapsedState);
+  domainHeaderRow.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    event.preventDefault();
+    toggleCollapsedState();
+  });
+
+  const initialCollapsed =
+    typeof isDomainCollapsed === "function" ? Boolean(isDomainCollapsed(domain)) : false;
+
   fieldsList.append(domainSection);
-  state.domainUiByDomain.set(domain, { trackInput, domainFlagsList, refreshButton });
+  state.domainUiByDomain.set(domain, {
+    trackInput,
+    trackRow,
+    domainFlagsList,
+    refreshButton,
+    domainCountBadge,
+    domainHeaderTrigger: domainHeaderRow,
+    isCollapsed: false,
+    setCollapsed
+  });
+  setCollapsed(initialCollapsed);
+  updateDomainFlagCount(domain);
 }
 
 function getDomainFlagsList(domain) {
@@ -442,16 +537,15 @@ export function renderFlagBlock(flagInfo, callbacks) {
   title.textContent = `ID ${flagInfo.id}`;
 
   const status = flagInfo.status || "fetch_failed";
-  const statusBadge = createStatusBadge(status);
+  const errorBadgeText = status === "ok" ? "" : getFlagErrorBadgeText(status);
 
   const actionsGroup = document.createElement("div");
   actionsGroup.className = "flag-actions";
   actionsGroup.append(title);
+  const flagNameGroup = document.createElement("div");
+  flagNameGroup.className = "flag-name-group";
   if (inlineFlagName) {
-    const flagNameGroup = document.createElement("div");
-    flagNameGroup.className = "flag-name-group";
     flagNameGroup.append(createFlagNameBadge(inlineFlagName));
-
     const copyFlagNameButton = document.createElement("button");
     copyFlagNameButton.className = "copy-flag-name-button";
     copyFlagNameButton.type = "button";
@@ -476,6 +570,10 @@ export function renderFlagBlock(flagInfo, callbacks) {
         createIterationBadge(`v${iterationDisplayValue}`, `Iteration ${iterationDisplayValue}`)
       );
     }
+  } else if (errorBadgeText) {
+    flagNameGroup.append(createFlagErrorBadge(errorBadgeText));
+  }
+  if (flagNameGroup.childElementCount > 0) {
     titleRow.append(flagNameGroup);
   }
   if (flagKey === state.highlightedFlagKey) {
@@ -489,9 +587,6 @@ export function renderFlagBlock(flagInfo, callbacks) {
   removeButton.addEventListener("click", () => {
     void onRemoveFlag(flagInfo.domain, flagInfo.id, block);
   });
-  if (statusBadge) {
-    actionsGroup.append(statusBadge);
-  }
   actionsGroup.append(removeButton);
   titleRow.append(actionsGroup);
   block.append(titleRow);
@@ -524,4 +619,5 @@ export function renderFlagBlock(flagInfo, callbacks) {
   if (!existingBlock) {
     domainFlagsList.append(block);
   }
+  updateDomainFlagCount(flagInfo.domain);
 }

@@ -40,6 +40,22 @@ export function sanitizeTrackedIdsByDomain(rawMap) {
   return sanitized;
 }
 
+export function sanitizeCollapsedDomainsByDomain(rawMap) {
+  const sanitized = {};
+  if (!rawMap || typeof rawMap !== "object") {
+    return sanitized;
+  }
+
+  for (const [domain, isCollapsed] of Object.entries(rawMap)) {
+    if (typeof domain !== "string" || domain.trim() === "") {
+      continue;
+    }
+    sanitized[domain] = Boolean(isCollapsed);
+  }
+
+  return sanitized;
+}
+
 export function createFieldValue(displayValue, colorValue) {
   return {
     displayValue: typeof displayValue === "string" ? displayValue : "",

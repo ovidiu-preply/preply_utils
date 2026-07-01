@@ -1,4 +1,5 @@
 import {
+  COLLAPSED_DOMAINS_STORAGE_KEY,
   DEFAULT_POPUP_HEIGHT,
   DEFAULT_POPUP_WIDTH,
   FLAG_CACHE_STORAGE_KEY,
@@ -9,7 +10,12 @@ import {
   TRACKED_IDS_STORAGE_KEY
 } from "./constants.js";
 import { fetchFlagInfo, getCurrentTabInfo, getDomainsForRender, isSupportedDomain } from "./fetching.js";
-import { sanitizeFlagInfo, sanitizeFlagInfoByDomain, sanitizeTrackedIdsByDomain } from "./parsing.js";
+import {
+  sanitizeCollapsedDomainsByDomain,
+  sanitizeFlagInfo,
+  sanitizeFlagInfoByDomain,
+  sanitizeTrackedIdsByDomain
+} from "./parsing.js";
 import { state } from "./state.js";
 import { getFromStorage, setInStorage } from "./storage.js";
 import {
@@ -19,6 +25,7 @@ import {
   renderFlagBlock,
   setError,
   setRefreshButtonLoadingState,
+  updateDomainFlagCount,
   updateAllLastFetchedLabels
 } from "./ui.js";
 
@@ -151,6 +158,10 @@ async function saveFlagInfoCache() {
   await setInStorage({ [FLAG_CACHE_STORAGE_KEY]: state.flagInfoByDomain });
 }
 
+async function saveCollapsedDomains() {
+  await setInStorage({ [COLLAPSED_DOMAINS_STORAGE_KEY]: state.collapsedDomainsByDomain });
+}
+
 function getTrackedIdsForDomain(domain) {
   return Array.isArray(state.trackedFlagIdsByDomain[domain])
     ? state.trackedFlagIdsByDomain[domain]
@@ -184,13 +195,28 @@ async function removeTrackedDomain(domain) {
 
   delete state.trackedFlagIdsByDomain[domain];
   delete state.flagInfoByDomain[domain];
+  delete state.collapsedDomainsByDomain[domain];
   try {
-    await Promise.all([saveTrackedIds(), saveFlagInfoCache()]);
+    await Promise.all([saveTrackedIds(), saveFlagInfoCache(), saveCollapsedDomains()]);
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown error";
     setError(`Cannot remove domain: ${message}`);
     return false;
+  }
+}
+
+function isDomainCollapsed(domain) {
+  return Boolean(state.collapsedDomainsByDomain[domain]);
+}
+
+async function handleToggleDomainCollapse(domain, isCollapsed) {
+  state.collapsedDomainsByDomain[domain] = isCollapsed;
+  try {
+    await saveCollapsedDomains();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    setError(`Cannot save collapsed domains: ${message}`);
   }
 }
 
@@ -298,6 +324,7 @@ async function handleRemoveFlag(domain, id, block) {
   const wasRemoved = await removeTrackedFlag(domain, id);
   if (wasRemoved) {
     block.remove();
+    updateDomainFlagCount(domain);
   }
 }
 
@@ -355,6 +382,15 @@ async function loadFlagInfo() {
   }
 
   try {
+    const fromStorage = await getFromStorage(COLLAPSED_DOMAINS_STORAGE_KEY);
+    state.collapsedDomainsByDomain = sanitizeCollapsedDomainsByDomain(fromStorage);
+  } catch (error) {
+    state.collapsedDomainsByDomain = sanitizeCollapsedDomainsByDomain(null);
+    const message = error instanceof Error ? error.message : "unknown error";
+    setError(`Cannot read collapsed domains: ${message}`);
+  }
+
+  try {
     const fromStorage = await getFromStorage(FLAG_CACHE_STORAGE_KEY);
     state.flagInfoByDomain = sanitizeFlagInfoByDomain(fromStorage);
   } catch (error) {
@@ -392,7 +428,9 @@ async function loadFlagInfo() {
       onRemoveDomain: handleRemoveDomain,
       onRefreshDomain: refreshDomainFlags,
       onTrackClick: handleTrackClick,
-      onReorderFlags: handleReorderFlags
+      onReorderFlags: handleReorderFlags,
+      onToggleDomainCollapse: handleToggleDomainCollapse,
+      isDomainCollapsed
     });
     const ids = getTrackedIdsForDomain(domain);
     for (const id of ids) {
