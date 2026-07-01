@@ -1,5 +1,6 @@
 const ROOT_MENU_ID = "bring-session-from-root";
 const COPY_CURRENT_SESSION_MENU_ID = "copy-current-tab-session-id";
+const PASTE_CLIPBOARD_TO_CURRENT_SESSION_MENU_ID = "paste-clipboard-to-current-tab-session-id";
 const SESSION_COOKIE_NAME = "sessionid";
 const LOG_PREFIX = "[SessionCopier]";
 
@@ -81,6 +82,12 @@ async function ensureRootMenu() {
     contexts: ["page"],
     visible: false
   });
+  await chrome.contextMenus.create({
+    id: PASTE_CLIPBOARD_TO_CURRENT_SESSION_MENU_ID,
+    title: "Paste clipboard into current tab session id",
+    contexts: ["page"],
+    visible: false
+  });
 }
 
 async function rebuildSourceMenus(currentTab) {
@@ -90,6 +97,10 @@ async function rebuildSourceMenus(currentTab) {
     !!currentTab.id && !!currentTab.url && isSupportedTabUrl(currentTab.url);
 
   await chrome.contextMenus.update(COPY_CURRENT_SESSION_MENU_ID, {
+    visible: isCurrentTabSupported,
+    enabled: isCurrentTabSupported
+  });
+  await chrome.contextMenus.update(PASTE_CLIPBOARD_TO_CURRENT_SESSION_MENU_ID, {
     visible: isCurrentTabSupported,
     enabled: isCurrentTabSupported
   });
@@ -324,6 +335,36 @@ async function copySessionCookie(sourceTab, targetTab) {
     return { ok: false, reason: "invalid-target-url" };
   }
 
+  const setResult = await setTargetTabSessionCookieValue(targetTab, sourceCookie.value);
+  if (!setResult.ok) {
+    return setResult;
+  }
+
+  console.warn(`${LOG_PREFIX} cookie copied, reloading target`, {
+    sourceTabId: sourceTab.id,
+    targetTabId: targetTab.id,
+    targetUrl: targetTab.url,
+    cookieDomain: sourceCookie.domain || "host-only",
+    cookiePath: sourceCookie.path || "/"
+  });
+  await chrome.tabs.reload(targetTab.id, { bypassCache: true });
+  return { ok: true };
+}
+
+async function setTargetTabSessionCookieValue(targetTab, newSessionValue) {
+  if (!targetTab.url) {
+    return { ok: false, reason: "missing-tab-url" };
+  }
+
+  const targetUrl = parseUrl(targetTab.url);
+  if (!targetUrl) {
+    console.warn(`${LOG_PREFIX} invalid target URL`, {
+      targetTabId: targetTab.id,
+      targetUrl: targetTab.url
+    });
+    return { ok: false, reason: "invalid-target-url" };
+  }
+
   const targetCookie = await getSessionCookieForTargetTab(targetTab);
   if (!targetCookie) {
     console.warn(`${LOG_PREFIX} target cookie missing`, {
@@ -346,7 +387,7 @@ async function copySessionCookie(sourceTab, targetTab) {
   const setPayload = {
     url: cookieUrl,
     name: SESSION_COOKIE_NAME,
-    value: sourceCookie.value,
+    value: newSessionValue,
     path: targetCookie.path || "/",
     secure: targetCookie.secure,
     httpOnly: targetCookie.httpOnly,
@@ -363,8 +404,8 @@ async function copySessionCookie(sourceTab, targetTab) {
     setPayload.partitionKey = targetCookie.partitionKey;
   }
 
-  const setResult = await chrome.cookies.set(setPayload);
-  if (!setResult) {
+  const setCookieResult = await chrome.cookies.set(setPayload);
+  if (!setCookieResult) {
     console.warn(`${LOG_PREFIX} cookie set failed`, {
       targetTabId: targetTab.id,
       targetUrl: targetTab.url
@@ -372,14 +413,6 @@ async function copySessionCookie(sourceTab, targetTab) {
     return { ok: false, reason: "cookie-set-failed" };
   }
 
-  console.warn(`${LOG_PREFIX} cookie copied, reloading target`, {
-    sourceTabId: sourceTab.id,
-    targetTabId: targetTab.id,
-    targetUrl: targetTab.url,
-    cookieDomain: sourceCookie.domain || "host-only",
-    cookiePath: sourceCookie.path || "/"
-  });
-  await chrome.tabs.reload(targetTab.id, { bypassCache: true });
   return { ok: true };
 }
 
@@ -429,6 +462,55 @@ async function copyCurrentTabSessionIdToClipboard(tab) {
     return { ok: false, reason: "clipboard-copy-failed" };
   }
 
+  return { ok: true };
+}
+
+async function readClipboardTextOnTab(tabId) {
+  const injectionResults = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: async () => {
+      try {
+        const value = await navigator.clipboard.readText();
+        return typeof value === "string" ? value : "";
+      } catch (_error) {
+        try {
+          const textarea = document.createElement("textarea");
+          textarea.style.position = "fixed";
+          textarea.style.left = "-9999px";
+          textarea.style.opacity = "0";
+          document.body.appendChild(textarea);
+          textarea.focus();
+          const pasted = document.execCommand("paste");
+          const value = pasted ? textarea.value : "";
+          textarea.remove();
+          return typeof value === "string" ? value : "";
+        } catch (_fallbackError) {
+          return "";
+        }
+      }
+    }
+  });
+
+  const value = injectionResults?.[0]?.result;
+  return typeof value === "string" ? value : "";
+}
+
+async function pasteClipboardIntoCurrentTabSessionId(tab) {
+  if (!tab.id || !tab.url || !isSupportedTabUrl(tab.url)) {
+    return { ok: false, reason: "unsupported-or-missing-tab-url" };
+  }
+
+  const clipboardValue = (await readClipboardTextOnTab(tab.id)).trim();
+  if (!clipboardValue) {
+    return { ok: false, reason: "clipboard-empty-or-unavailable" };
+  }
+
+  const setResult = await setTargetTabSessionCookieValue(tab, clipboardValue);
+  if (!setResult.ok) {
+    return setResult;
+  }
+
+  await chrome.tabs.reload(tab.id, { bypassCache: true });
   return { ok: true };
 }
 
@@ -541,6 +623,30 @@ chrome.contextMenus.onClicked.addListener((info, clickedTab) => {
       })
       .catch((error) => {
         console.error("Failed to copy current tab session id", error);
+      });
+    return;
+  }
+
+  if (info.menuItemId === PASTE_CLIPBOARD_TO_CURRENT_SESSION_MENU_ID) {
+    resolveTargetTab(clickedTab)
+      .then(async (maybeTargetTab) => {
+        const targetTab = maybeTargetTab?.id ? await getTabOrNull(maybeTargetTab.id) : null;
+        if (!targetTab) {
+          console.warn("Cannot paste clipboard to sessionid: target tab closed.");
+          return;
+        }
+
+        const result = await pasteClipboardIntoCurrentTabSessionId(targetTab);
+        if (!result.ok) {
+          console.warn(`Session id clipboard paste skipped: ${result.reason}`);
+        } else {
+          console.warn(`${LOG_PREFIX} pasted clipboard into session id`, {
+            targetTabId: targetTab.id
+          });
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to paste clipboard into current tab session id", error);
       });
     return;
   }
