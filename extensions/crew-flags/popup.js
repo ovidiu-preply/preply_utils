@@ -69,11 +69,10 @@ function sanitizeFlagInfo(rawInfo) {
 
   const sanitized = { status };
   if (status === "ok") {
-    sanitized.flagName = typeof rawInfo.flagName === "string" ? rawInfo.flagName : "";
-    sanitized.everyone = typeof rawInfo.everyone === "string" ? rawInfo.everyone : "";
-    sanitized.percent = typeof rawInfo.percent === "string" ? rawInfo.percent : "";
-    sanitized.audiencePercent =
-      typeof rawInfo.audiencePercent === "string" ? rawInfo.audiencePercent : "";
+    sanitized.flagName = sanitizeFieldValue(rawInfo.flagName).displayValue;
+    sanitized.everyone = sanitizeFieldValue(rawInfo.everyone);
+    sanitized.percent = sanitizeFieldValue(rawInfo.percent);
+    sanitized.audiencePercent = sanitizeFieldValue(rawInfo.audiencePercent);
   } else if (status === "fetch_failed") {
     sanitized.error =
       typeof rawInfo.error === "string" && rawInfo.error.trim() !== ""
@@ -196,25 +195,47 @@ function setInStorage(entries) {
   });
 }
 
+function createFieldValue(displayValue, colorValue) {
+  return {
+    displayValue: typeof displayValue === "string" ? displayValue : "",
+    colorValue: typeof colorValue === "string" ? colorValue : ""
+  };
+}
+
+function sanitizeFieldValue(rawValue) {
+  if (typeof rawValue === "string") {
+    return createFieldValue(rawValue, rawValue);
+  }
+  if (!rawValue || typeof rawValue !== "object") {
+    return createFieldValue("", "");
+  }
+  return createFieldValue(rawValue.displayValue, rawValue.colorValue);
+}
+
 function getFieldFromContainer(container) {
   return container.querySelector("input, select, textarea, .readonly");
 }
 
 function readFieldValue(field) {
   if (field.classList.contains("readonly")) {
-    return field.textContent || "";
+    const textContent = field.textContent || "";
+    return createFieldValue(textContent, textContent);
   }
 
   if (field.tagName.toLowerCase() === "select") {
     const selectedOption = field.options[field.selectedIndex];
-    return selectedOption ? selectedOption.textContent || "" : "";
+    if (!selectedOption) {
+      return createFieldValue("", "");
+    }
+    return createFieldValue(selectedOption.textContent || "", selectedOption.value || "");
   }
 
   if ("value" in field) {
-    return field.value;
+    return createFieldValue(field.value, field.value);
   }
 
-  return field.textContent || "";
+  const textContent = field.textContent || "";
+  return createFieldValue(textContent, textContent);
 }
 
 function extractByExactLabel(parsedDocument, labelText) {
@@ -264,9 +285,21 @@ function createValueLine(label, value) {
   labelElement.className = "label";
   labelElement.textContent = label;
 
+  const parsedValue = sanitizeFieldValue(value);
+  const normalizedDisplayValue = normalizeText(parsedValue.displayValue);
+  const normalizedColorValue = normalizeText(parsedValue.colorValue);
+
   const valueElement = document.createElement("div");
   valueElement.className = "value value-badge";
-  valueElement.textContent = normalizeText(value) || "-";
+  const normalizedLowerColorValue = normalizedColorValue.toLowerCase();
+  if (normalizedLowerColorValue === "true") {
+    valueElement.classList.add("value-badge-true");
+  } else if (normalizedLowerColorValue === "false") {
+    valueElement.classList.add("value-badge-false");
+  } else if (normalizedDisplayValue !== "") {
+    valueElement.classList.add("value-badge-other");
+  }
+  valueElement.textContent = normalizedDisplayValue || "-";
 
   line.append(labelElement, valueElement);
   return line;
@@ -706,7 +739,7 @@ async function fetchFlagInfo(domain, flagId) {
       domain,
       id: flagId,
       status: "ok",
-      flagName: extractByExactLabel(parsed, "Name:"),
+      flagName: sanitizeFieldValue(extractByExactLabel(parsed, "Name:")).displayValue,
       everyone: extractByExactLabel(parsed, "Everyone - used to control the rollout:"),
       percent: extractByExactLabel(parsed, "Percent:"),
       audiencePercent: extractByExactLabel(parsed, "Audience percent:")
