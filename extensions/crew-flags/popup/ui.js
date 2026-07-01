@@ -48,6 +48,28 @@ function createValueLine(label, value) {
   return line;
 }
 
+function createPercentagesLine(percent, audiencePercent) {
+  const line = document.createElement("li");
+  line.className = "field-row";
+
+  const labelElement = document.createElement("div");
+  labelElement.className = "label";
+  labelElement.textContent = "Percent / Audience percent";
+
+  const valuesContainer = document.createElement("div");
+  valuesContainer.style.display = "inline-flex";
+  valuesContainer.style.alignItems = "center";
+  valuesContainer.style.flexWrap = "wrap";
+  valuesContainer.style.gap = "6px";
+  valuesContainer.append(
+    createValueLine("Percent", percent).lastElementChild,
+    createValueLine("Audience percent", audiencePercent).lastElementChild
+  );
+
+  line.append(labelElement, valuesContainer);
+  return line;
+}
+
 function createStatusBadge(status) {
   const badge = document.createElement("span");
   badge.style.fontSize = "11px";
@@ -97,6 +119,22 @@ function createFlagNameBadge(label) {
   badge.style.background = "#ccfbf1";
   badge.style.borderColor = "#5eead4";
   badge.textContent = label;
+  return badge;
+}
+
+function createIterationBadge(label, tooltip) {
+  const badge = document.createElement("span");
+  badge.className = "value-badge";
+  badge.style.fontSize = "12px";
+  badge.style.marginLeft = "2px";
+  badge.style.color = "#4338ca";
+  badge.style.background = "#e0e7ff";
+  badge.style.borderColor = "#a5b4fc";
+  badge.textContent = label;
+  if (tooltip) {
+    badge.title = tooltip;
+    badge.setAttribute("aria-label", tooltip);
+  }
   return badge;
 }
 
@@ -398,6 +436,9 @@ export function renderFlagBlock(flagInfo, callbacks) {
     flagInfo.status === "ok" && typeof flagInfo.flagName === "string"
       ? normalizeText(flagInfo.flagName)
       : "";
+  const iterationDisplayValue =
+    flagInfo.status === "ok" ? normalizeText(sanitizeFieldValue(flagInfo.iteration).displayValue) : "";
+  const shouldShowIterationBadge = iterationDisplayValue !== "" && iterationDisplayValue !== "1";
   title.textContent = `ID ${flagInfo.id}`;
 
   const status = flagInfo.status || "fetch_failed";
@@ -430,6 +471,11 @@ export function renderFlagBlock(flagInfo, callbacks) {
       }, 1000);
     });
     flagNameGroup.append(copyFlagNameButton);
+    if (shouldShowIterationBadge) {
+      flagNameGroup.append(
+        createIterationBadge(`v${iterationDisplayValue}`, `Iteration ${iterationDisplayValue}`)
+      );
+    }
     titleRow.append(flagNameGroup);
   }
   if (flagKey === state.highlightedFlagKey) {
@@ -464,8 +510,7 @@ export function renderFlagBlock(flagInfo, callbacks) {
     subList.append(
       createValueLine("Everyone - used to control the rollout", flagInfo.everyone)
     );
-    subList.append(createValueLine("Percent", flagInfo.percent));
-    subList.append(createValueLine("Audience percent", flagInfo.audiencePercent));
+    subList.append(createPercentagesLine(flagInfo.percent, flagInfo.audiencePercent));
   }
 
   block.append(subList);

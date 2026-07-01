@@ -78,6 +78,7 @@ export function sanitizeFlagInfo(rawInfo) {
     sanitized.everyone = sanitizeFieldValue(rawInfo.everyone);
     sanitized.percent = sanitizeFieldValue(rawInfo.percent);
     sanitized.audiencePercent = sanitizeFieldValue(rawInfo.audiencePercent);
+    sanitized.iteration = sanitizeFieldValue(rawInfo.iteration);
   } else if (status === "fetch_failed") {
     sanitized.error =
       typeof rawInfo.error === "string" && rawInfo.error.trim() !== ""

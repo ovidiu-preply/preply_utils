@@ -97,7 +97,8 @@ export async function fetchFlagInfo(domain, flagId) {
       flagName: sanitizeFieldValue(extractByExactLabel(parsed, "Name:")).displayValue,
       everyone: extractByExactLabel(parsed, "Everyone - used to control the rollout:"),
       percent: extractByExactLabel(parsed, "Percent:"),
-      audiencePercent: extractByExactLabel(parsed, "Audience percent:")
+      audiencePercent: extractByExactLabel(parsed, "Audience percent:"),
+      iteration: extractByExactLabel(parsed, "Iteration:")
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown error";
