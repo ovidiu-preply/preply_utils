@@ -7,21 +7,105 @@
     <style>
       html,
       body {
+        --popup-width: 560px;
+        --popup-height: 520px;
         margin: 0;
-        width: 560px;
-        height: 520px;
+        width: var(--popup-width);
+        height: var(--popup-height);
+        overflow: hidden;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         background: #fff;
       }
 
       main {
         box-sizing: border-box;
+        width: 100%;
+        height: 100%;
         padding: 12px;
+        overflow-y: auto;
       }
 
       h1 {
-        margin: 0 0 8px;
+        margin: 0;
         font-size: 15px;
+      }
+
+      .popup-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+
+      .settings-toggle-button {
+        margin-left: auto;
+        width: 28px;
+        height: 28px;
+        border: none;
+        background: transparent;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 16px;
+        line-height: 1;
+        color: #374151;
+        padding: 4px;
+      }
+
+      .settings-toggle-button:hover {
+        background: #f3f4f6;
+      }
+
+      .settings-toggle-button:focus-visible {
+        outline: 2px solid #6366f1;
+        outline-offset: 1px;
+      }
+
+      .settings-panel {
+        border: 1px solid #e5e7eb;
+        background: #f9fafb;
+        border-radius: 8px;
+        padding: 8px;
+        margin-bottom: 10px;
+      }
+
+      .settings-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr auto;
+        gap: 8px;
+        align-items: end;
+      }
+
+      .settings-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .settings-label {
+        font-size: 11px;
+        color: #4b5563;
+      }
+
+      .settings-input {
+        box-sizing: border-box;
+        width: 100%;
+        font-size: 12px;
+        padding: 4px 6px;
+      }
+
+      .settings-save-button {
+        height: 26px;
+        border: 1px solid #cbd5e1;
+        background: #fff;
+        border-radius: 6px;
+        cursor: pointer;
+        padding: 0 10px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .settings-save-button:hover {
+        background: #eef2ff;
+        border-color: #c7d2fe;
       }
 
       #title {
@@ -296,7 +380,25 @@
   </head>
   <body>
     <main>
-      <h1>Flag info</h1>
+      <div class="popup-header">
+        <h1>Flag info</h1>
+        <button id="settings-toggle" class="settings-toggle-button" type="button" aria-label="Settings">
+          &#9881;
+        </button>
+      </div>
+      <section id="settings-panel" class="settings-panel" hidden>
+        <div class="settings-grid">
+          <label class="settings-field">
+            <span class="settings-label">Width</span>
+            <input id="popup-width-input" class="settings-input" type="number" min="320" max="800" step="1" />
+          </label>
+          <label class="settings-field">
+            <span class="settings-label">Height</span>
+            <input id="popup-height-input" class="settings-input" type="number" min="320" max="600" step="1" />
+          </label>
+          <button id="save-settings-button" class="settings-save-button" type="button">Save</button>
+        </div>
+      </section>
       <ul id="fields"></ul>
       <div id="error"></div>
     </main>

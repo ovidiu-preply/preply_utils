@@ -1,4 +1,13 @@
-import { FLAG_CACHE_STORAGE_KEY, TRACKED_IDS_STORAGE_KEY } from "./constants.js";
+import {
+  DEFAULT_POPUP_HEIGHT,
+  DEFAULT_POPUP_WIDTH,
+  FLAG_CACHE_STORAGE_KEY,
+  MAX_POPUP_HEIGHT,
+  MAX_POPUP_WIDTH,
+  MIN_POPUP_DIMENSION,
+  POPUP_SETTINGS_STORAGE_KEY,
+  TRACKED_IDS_STORAGE_KEY
+} from "./constants.js";
 import { fetchFlagInfo, getCurrentTabInfo, getDomainsForRender, isSupportedDomain } from "./fetching.js";
 import { sanitizeFlagInfo, sanitizeFlagInfoByDomain, sanitizeTrackedIdsByDomain } from "./parsing.js";
 import { state } from "./state.js";
@@ -15,6 +24,123 @@ import {
 
 function normalizeId(id) {
   return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+function sanitizePopupDimension(value, fallbackValue, maxValue) {
+  const parsedValue = Number.parseInt(String(value), 10);
+  if (!Number.isInteger(parsedValue)) {
+    return fallbackValue;
+  }
+  if (parsedValue < MIN_POPUP_DIMENSION) {
+    return MIN_POPUP_DIMENSION;
+  }
+  if (parsedValue > maxValue) {
+    return maxValue;
+  }
+  return parsedValue;
+}
+
+function sanitizePopupSettings(rawSettings) {
+  const settings = rawSettings && typeof rawSettings === "object" ? rawSettings : {};
+  return {
+    width: sanitizePopupDimension(settings.width, DEFAULT_POPUP_WIDTH, MAX_POPUP_WIDTH),
+    height: sanitizePopupDimension(settings.height, DEFAULT_POPUP_HEIGHT, MAX_POPUP_HEIGHT)
+  };
+}
+
+function applyPopupSettings(settings) {
+  document.documentElement.style.width = `${settings.width}px`;
+  document.documentElement.style.height = `${settings.height}px`;
+  document.body.style.width = `${settings.width}px`;
+  document.body.style.height = `${settings.height}px`;
+}
+
+function syncPopupSettingsForm(settings) {
+  const widthInput = document.getElementById("popup-width-input");
+  const heightInput = document.getElementById("popup-height-input");
+  if (!(widthInput instanceof HTMLInputElement) || !(heightInput instanceof HTMLInputElement)) {
+    return;
+  }
+  widthInput.value = String(settings.width);
+  heightInput.value = String(settings.height);
+}
+
+function getPopupSettingsFromForm() {
+  const widthInput = document.getElementById("popup-width-input");
+  const heightInput = document.getElementById("popup-height-input");
+  if (!(widthInput instanceof HTMLInputElement) || !(heightInput instanceof HTMLInputElement)) {
+    return state.popupSettings;
+  }
+  return sanitizePopupSettings({
+    width: widthInput.value,
+    height: heightInput.value
+  });
+}
+
+async function loadPopupSettings() {
+  try {
+    const rawSettings = await getFromStorage(POPUP_SETTINGS_STORAGE_KEY);
+    state.popupSettings = sanitizePopupSettings(rawSettings);
+  } catch (error) {
+    state.popupSettings = sanitizePopupSettings(null);
+    const message = error instanceof Error ? error.message : "unknown error";
+    setError(`Cannot read popup settings: ${message}`);
+  }
+  applyPopupSettings(state.popupSettings);
+  syncPopupSettingsForm(state.popupSettings);
+}
+
+async function savePopupSettings() {
+  const settings = getPopupSettingsFromForm();
+  state.popupSettings = settings;
+  applyPopupSettings(settings);
+  syncPopupSettingsForm(settings);
+  try {
+    await setInStorage({ [POPUP_SETTINGS_STORAGE_KEY]: settings });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    setError(`Cannot save popup settings: ${message}`);
+  }
+}
+
+function setupPopupSettingsUi() {
+  const settingsToggleButton = document.getElementById("settings-toggle");
+  const settingsPanel = document.getElementById("settings-panel");
+  const saveSettingsButton = document.getElementById("save-settings-button");
+  const widthInput = document.getElementById("popup-width-input");
+  const heightInput = document.getElementById("popup-height-input");
+
+  if (!(settingsToggleButton instanceof HTMLButtonElement) || !(settingsPanel instanceof HTMLElement)) {
+    return;
+  }
+
+  settingsToggleButton.setAttribute("aria-expanded", "false");
+  settingsToggleButton.addEventListener("click", () => {
+    const isOpen = !settingsPanel.hasAttribute("hidden");
+    settingsPanel.toggleAttribute("hidden", isOpen);
+    settingsToggleButton.setAttribute("aria-expanded", isOpen ? "false" : "true");
+  });
+
+  if (saveSettingsButton instanceof HTMLButtonElement) {
+    saveSettingsButton.addEventListener("click", () => {
+      void savePopupSettings();
+    });
+  }
+
+  const handleSubmitOnEnter = (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    void savePopupSettings();
+  };
+
+  if (widthInput instanceof HTMLInputElement) {
+    widthInput.addEventListener("keydown", handleSubmitOnEnter);
+  }
+  if (heightInput instanceof HTMLInputElement) {
+    heightInput.addEventListener("keydown", handleSubmitOnEnter);
+  }
 }
 
 async function saveTrackedIds() {
@@ -246,5 +372,11 @@ async function loadFlagInfo() {
   }
 }
 
-void loadFlagInfo();
+async function initializePopup() {
+  setupPopupSettingsUi();
+  await loadPopupSettings();
+  await loadFlagInfo();
+}
+
+void initializePopup();
 setInterval(updateAllLastFetchedLabels, 1000);

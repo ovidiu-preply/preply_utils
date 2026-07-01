@@ -3,5 +3,9 @@ export const state = {
   trackedFlagIdsByDomain: {},
   flagInfoByDomain: {},
   highlightedDomain: "",
-  highlightedFlagKey: ""
+  highlightedFlagKey: "",
+  popupSettings: {
+    width: 560,
+    height: 520
+  }
 };
