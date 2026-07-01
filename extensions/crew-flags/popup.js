@@ -3,6 +3,8 @@ const FLAG_CACHE_STORAGE_KEY = "flagInfoByDomain";
 const domainUiByDomain = new Map();
 let trackedFlagIdsByDomain = {};
 let flagInfoByDomain = {};
+let highlightedDomain = "";
+let highlightedFlagKey = "";
 
 function normalizeText(value) {
   return (value || "").replace(/\s+/g, " ").trim();
@@ -125,7 +127,24 @@ function extractDomainFromUrl(url) {
   }
 }
 
-function getCurrentTabDomain() {
+function extractFlagIdFromUrl(url) {
+  try {
+    const parsedUrl = new URL(url);
+    const match = parsedUrl.pathname.match(
+      /^\/crew\/waffle\/(?:flag|flagexperiment)\/(\d+)\/change\/?$/
+    );
+    if (!match) {
+      return null;
+    }
+
+    const parsedId = Number.parseInt(match[1], 10);
+    return normalizeId(parsedId);
+  } catch {
+    return null;
+  }
+}
+
+function getCurrentTabInfo() {
   return new Promise((resolve, reject) => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (chrome.runtime.lastError) {
@@ -135,7 +154,10 @@ function getCurrentTabDomain() {
 
       const [activeTab] = tabs;
       const url = activeTab && typeof activeTab.url === "string" ? activeTab.url : "";
-      resolve(extractDomainFromUrl(url));
+      resolve({
+        domain: extractDomainFromUrl(url),
+        prefillFlagId: extractFlagIdFromUrl(url)
+      });
     });
   });
 }
@@ -284,6 +306,13 @@ function createStatusBadge(status) {
   return badge;
 }
 
+function createContextBadge(label) {
+  const badge = document.createElement("span");
+  badge.className = "context-badge";
+  badge.textContent = label;
+  return badge;
+}
+
 function getFlagKey(flagInfo) {
   return `${flagInfo.domain}::${flagInfo.id}`;
 }
@@ -362,6 +391,7 @@ function renderDomainSection(domain) {
   }
 
   const domainSection = document.createElement("li");
+  domainSection.classList.add("domain-card");
   const domainHeaderRow = document.createElement("div");
   domainHeaderRow.className = "domain-header-row";
 
@@ -369,6 +399,9 @@ function renderDomainSection(domain) {
   domainTitle.className = "value domain-title";
   domainTitle.textContent = domain;
   domainHeaderRow.append(domainTitle);
+  if (domain === highlightedDomain) {
+    domainHeaderRow.append(createContextBadge("Current page"));
+  }
 
   const removeDomainButton = document.createElement("button");
   removeDomainButton.className = "remove-domain-button";
@@ -439,6 +472,9 @@ function renderFlagBlock(flagInfo) {
   const status = flagInfo.status || "fetch_failed";
   const statusBadge = createStatusBadge(status);
   titleRow.append(title, statusBadge);
+  if (flagKey === highlightedFlagKey) {
+    titleRow.append(createContextBadge("Current page flag"));
+  }
 
   const removeButton = document.createElement("button");
   removeButton.className = "remove-button";
@@ -637,6 +673,9 @@ async function loadFlagInfo() {
   clearFields();
   domainUiByDomain.clear();
   let currentDomain = "";
+  let prefillFlagId = null;
+  highlightedDomain = "";
+  highlightedFlagKey = "";
 
   try {
     const fromStorage = await getFromStorage(TRACKED_IDS_STORAGE_KEY);
@@ -657,18 +696,41 @@ async function loadFlagInfo() {
   }
 
   try {
-    currentDomain = await getCurrentTabDomain();
+    const currentTabInfo = await getCurrentTabInfo();
+    currentDomain = currentTabInfo.domain;
+    prefillFlagId = currentTabInfo.prefillFlagId;
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown error";
     setError(`Cannot read current tab: ${message}`);
   }
 
   const domains = getDomainsForRender(trackedFlagIdsByDomain, currentDomain);
+  const currentDomainIds = getTrackedIdsForDomain(currentDomain);
+  const isCurrentDomainSupported = isSupportedDomain(currentDomain);
+  const isCurrentFlagTracked =
+    isCurrentDomainSupported &&
+    prefillFlagId !== null &&
+    currentDomainIds.includes(prefillFlagId);
+
+  if (isCurrentDomainSupported) {
+    highlightedDomain = currentDomain;
+  }
+  if (isCurrentDomainSupported && prefillFlagId !== null) {
+    highlightedFlagKey = `${currentDomain}::${prefillFlagId}`;
+  }
+
   for (const domain of domains) {
     renderDomainSection(domain);
     const ids = getTrackedIdsForDomain(domain);
     for (const id of ids) {
       renderCachedFlag(domain, id);
+    }
+  }
+
+  if (isCurrentDomainSupported && prefillFlagId !== null && !isCurrentFlagTracked) {
+    const ui = domainUiByDomain.get(currentDomain);
+    if (ui) {
+      ui.trackInput.value = String(prefillFlagId);
     }
   }
 }
