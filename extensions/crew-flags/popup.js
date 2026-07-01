@@ -1,7 +1,7 @@
-const FLAG_IDS_BY_DOMAIN = {
-  "crew.stage39.preply.org": [1, 2, 3],
-  "crew.preply.com": [6, 7]
-};
+const DOMAINS = ["crew.stage39.preply.org", "crew.preply.com"];
+const STORAGE_KEY = "trackedFlagIdsByDomain";
+const domainUiByDomain = new Map();
+let trackedFlagIdsByDomain = {};
 
 function normalizeText(value) {
   return (value || "").replace(/\s+/g, " ").trim();
@@ -13,6 +13,65 @@ function setError(message) {
     return;
   }
   errorElement.textContent = message;
+}
+
+function normalizeId(id) {
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+function sanitizeIds(ids) {
+  if (!Array.isArray(ids)) {
+    return [];
+  }
+
+  const uniqueIds = [];
+  const seen = new Set();
+  for (const rawId of ids) {
+    const id = normalizeId(rawId);
+    if (id === null || seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    uniqueIds.push(id);
+  }
+
+  return uniqueIds;
+}
+
+function sanitizeTrackedIdsByDomain(rawMap) {
+  const sanitized = {};
+  for (const domain of DOMAINS) {
+    const rawIds =
+      rawMap && typeof rawMap === "object"
+        ? rawMap[domain]
+        : [];
+    sanitized[domain] = sanitizeIds(rawIds);
+  }
+  return sanitized;
+}
+
+function getFromStorage(key) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.get(key, (result) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(result[key]);
+    });
+  });
+}
+
+function setInStorage(entries) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.set(entries, () => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve();
+    });
+  });
 }
 
 function getFieldFromContainer(container) {
@@ -123,31 +182,90 @@ function getFlagKey(flagInfo) {
   return `${flagInfo.domain}::${flagInfo.id}`;
 }
 
-function renderDomainHeader(domain) {
+async function removeTrackedFlag(domain, id) {
+  const existingIds = getTrackedIdsForDomain(domain);
+  if (!existingIds.includes(id)) {
+    return true;
+  }
+
+  trackedFlagIdsByDomain[domain] = existingIds.filter((trackedId) => trackedId !== id);
+  try {
+    await saveTrackedIds();
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    setError(`Cannot remove tracked ID: ${message}`);
+    return false;
+  }
+}
+
+function createTrackRow(domain) {
+  const row = document.createElement("div");
+  row.className = "track-row";
+
+  const input = document.createElement("input");
+  input.className = "track-input";
+  input.type = "number";
+  input.min = "1";
+  input.step = "1";
+  input.placeholder = "Flag ID";
+
+  const button = document.createElement("button");
+  button.className = "track-button";
+  button.type = "button";
+  button.textContent = "Track";
+  button.addEventListener("click", () => {
+    void handleTrackClick(domain);
+  });
+
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void handleTrackClick(domain);
+    }
+  });
+
+  row.append(input, button);
+  return { row, input };
+}
+
+function renderDomainSection(domain) {
   const fieldsList = getFieldsList();
   if (!fieldsList) {
     return;
   }
 
-  const domainHeader = document.createElement("li");
+  const domainSection = document.createElement("li");
   const domainTitle = document.createElement("div");
-  domainTitle.className = "value";
+  domainTitle.className = "value domain-title";
   domainTitle.textContent = domain;
-  domainTitle.style.marginTop = "10px";
-  domainTitle.style.marginBottom = "8px";
-  domainHeader.append(domainTitle);
-  fieldsList.append(domainHeader);
+  domainSection.append(domainTitle);
+
+  const { row: trackRow, input: trackInput } = createTrackRow(domain);
+  domainSection.append(trackRow);
+
+  const domainFlagsList = document.createElement("ul");
+  domainFlagsList.setAttribute("data-domain-flags", domain);
+  domainSection.append(domainFlagsList);
+
+  fieldsList.append(domainSection);
+  domainUiByDomain.set(domain, { trackInput, domainFlagsList });
+}
+
+function getDomainFlagsList(domain) {
+  const ui = domainUiByDomain.get(domain);
+  return ui ? ui.domainFlagsList : null;
 }
 
 function renderFlagBlock(flagInfo) {
-  const fieldsList = getFieldsList();
-  if (!fieldsList) {
+  const domainFlagsList = getDomainFlagsList(flagInfo.domain);
+  if (!domainFlagsList) {
     return;
   }
 
   const targetUrl = `https://${flagInfo.domain}/crew/waffle/flag/${flagInfo.id}/change/`;
   const flagKey = getFlagKey(flagInfo);
-  const existingBlock = fieldsList.querySelector(`[data-flag-key="${flagKey}"]`);
+  const existingBlock = domainFlagsList.querySelector(`[data-flag-key="${flagKey}"]`);
   const block = existingBlock || document.createElement("li");
   block.replaceChildren();
   block.setAttribute("data-flag-key", flagKey);
@@ -166,6 +284,21 @@ function renderFlagBlock(flagInfo) {
   const status = flagInfo.status || "fetch_failed";
   const statusBadge = createStatusBadge(status);
   titleRow.append(title, statusBadge);
+
+  const removeButton = document.createElement("button");
+  removeButton.className = "remove-button";
+  removeButton.type = "button";
+  removeButton.textContent = "Remove";
+  removeButton.addEventListener("click", () => {
+    void (async () => {
+      setError("");
+      const wasRemoved = await removeTrackedFlag(flagInfo.domain, flagInfo.id);
+      if (wasRemoved) {
+        block.remove();
+      }
+    })();
+  });
+  titleRow.append(removeButton);
   block.append(titleRow);
 
   const subList = document.createElement("ul");
@@ -186,8 +319,55 @@ function renderFlagBlock(flagInfo) {
 
   block.append(subList);
   if (!existingBlock) {
-    fieldsList.append(block);
+    domainFlagsList.append(block);
   }
+}
+
+async function saveTrackedIds() {
+  await setInStorage({ [STORAGE_KEY]: trackedFlagIdsByDomain });
+}
+
+function getTrackedIdsForDomain(domain) {
+  return Array.isArray(trackedFlagIdsByDomain[domain])
+    ? trackedFlagIdsByDomain[domain]
+    : [];
+}
+
+async function fetchAndRenderFlag(domain, id) {
+  renderFlagBlock({ domain, id, status: "loading" });
+  const info = await fetchFlagInfo(domain, id);
+  renderFlagBlock(info);
+}
+
+async function handleTrackClick(domain) {
+  setError("");
+  const ui = domainUiByDomain.get(domain);
+  if (!ui) {
+    return;
+  }
+
+  const rawValue = ui.trackInput.value.trim();
+  const parsed = Number.parseInt(rawValue, 10);
+  const id = normalizeId(parsed);
+  if (id === null) {
+    setError(`Invalid flag ID for ${domain}. Use positive integer.`);
+    return;
+  }
+
+  const existingIds = getTrackedIdsForDomain(domain);
+  if (!existingIds.includes(id)) {
+    trackedFlagIdsByDomain[domain] = [...existingIds, id];
+    try {
+      await saveTrackedIds();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown error";
+      setError(`Cannot save tracked ID: ${message}`);
+      return;
+    }
+  }
+
+  ui.trackInput.value = "";
+  await fetchAndRenderFlag(domain, id);
 }
 
 async function fetchFlagInfo(domain, flagId) {
@@ -242,41 +422,24 @@ async function fetchFlagInfo(domain, flagId) {
 async function loadFlagInfo() {
   setError("");
   clearFields();
+  domainUiByDomain.clear();
 
-  const domains = Object.keys(FLAG_IDS_BY_DOMAIN);
-  if (domains.length === 0) {
-    setError("No domains configured.");
-    return;
+  try {
+    const fromStorage = await getFromStorage(STORAGE_KEY);
+    trackedFlagIdsByDomain = sanitizeTrackedIdsByDomain(fromStorage);
+  } catch (error) {
+    trackedFlagIdsByDomain = sanitizeTrackedIdsByDomain(null);
+    const message = error instanceof Error ? error.message : "unknown error";
+    setError(`Cannot read tracked IDs: ${message}`);
   }
 
-  let renderedAny = false;
   const fetchTasks = [];
-  for (const domain of domains) {
-    const ids = Array.isArray(FLAG_IDS_BY_DOMAIN[domain])
-      ? FLAG_IDS_BY_DOMAIN[domain]
-      : [];
-    const validIds = ids.filter((id) => Number.isInteger(id) && id > 0);
-
-    if (validIds.length === 0) {
-      continue;
+  for (const domain of DOMAINS) {
+    renderDomainSection(domain);
+    const ids = getTrackedIdsForDomain(domain);
+    for (const id of ids) {
+      fetchTasks.push(fetchAndRenderFlag(domain, id));
     }
-
-    renderedAny = true;
-    renderDomainHeader(domain);
-    for (const id of validIds) {
-      renderFlagBlock({ domain, id, status: "loading" });
-    }
-    for (const id of validIds) {
-      const task = fetchFlagInfo(domain, id).then((flagInfo) => {
-        renderFlagBlock(flagInfo);
-      });
-      fetchTasks.push(task);
-    }
-  }
-
-  if (!renderedAny) {
-    setError("No valid flag IDs configured.");
-    return;
   }
 
   await Promise.all(fetchTasks);

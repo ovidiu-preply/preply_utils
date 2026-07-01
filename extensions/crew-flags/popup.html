@@ -51,29 +51,43 @@
         font-weight: 600;
         word-break: break-word;
       }
+
+      .domain-title {
+        margin-top: 10px;
+        margin-bottom: 8px;
+      }
+
+      .track-row {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      .track-input {
+        flex: 1;
+        box-sizing: border-box;
+        font-size: 13px;
+        padding: 6px 8px;
+      }
+
+      .track-button {
+        font-size: 13px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+
+      .remove-button {
+        margin-left: 8px;
+        font-size: 12px;
+        padding: 3px 8px;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
     <main>
       <h1>Flag info</h1>
-      <ul id="fields">
-        <li>
-          <div class="label">Flag name</div>
-          <div class="value" data-field="flagName">Loading...</div>
-        </li>
-        <li>
-          <div class="label">Everyone - used to control the rollout</div>
-          <div class="value" data-field="everyone">Loading...</div>
-        </li>
-        <li>
-          <div class="label">Percent</div>
-          <div class="value" data-field="percent">Loading...</div>
-        </li>
-        <li>
-          <div class="label">Audience percent</div>
-          <div class="value" data-field="audiencePercent">Loading...</div>
-        </li>
-      </ul>
+      <ul id="fields"></ul>
       <div id="error"></div>
     </main>
     <script src="popup.js"></script>
