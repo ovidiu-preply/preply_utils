@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "crew-flags",
+  "description": "Minimal extension active on Crew stage/prod domains.",
+  "version": "0.1.0",
+  "host_permissions": [
+    "https://crew.preply.com/*",
+    "https://*.preply.org/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://crew.preply.com/*",
+        "https://*.preply.org/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "crew-flags",
+    "default_popup": "popup.html"
+  }
+}

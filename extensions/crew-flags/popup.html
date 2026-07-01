@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>crew-flags</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 420px;
+        height: 520px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #fff;
+      }
+
+      main {
+        box-sizing: border-box;
+        padding: 16px;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 16px;
+      }
+
+      #title {
+        font-size: 14px;
+        line-height: 1.4;
+        word-break: break-word;
+      }
+
+      ul {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      li {
+        margin: 0 0 10px;
+      }
+
+      .label {
+        font-size: 12px;
+        color: #555;
+        margin-bottom: 2px;
+      }
+
+      .value {
+        font-size: 14px;
+        font-weight: 600;
+        word-break: break-word;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Flag info</h1>
+      <ul id="fields">
+        <li>
+          <div class="label">Flag name</div>
+          <div class="value" data-field="flagName">Loading...</div>
+        </li>
+        <li>
+          <div class="label">Everyone - used to control the rollout</div>
+          <div class="value" data-field="everyone">Loading...</div>
+        </li>
+        <li>
+          <div class="label">Percent</div>
+          <div class="value" data-field="percent">Loading...</div>
+        </li>
+        <li>
+          <div class="label">Audience percent</div>
+          <div class="value" data-field="audiencePercent">Loading...</div>
+        </li>
+      </ul>
+      <div id="error"></div>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
