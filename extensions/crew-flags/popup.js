@@ -250,6 +250,7 @@ async function loadFlagInfo() {
   }
 
   let renderedAny = false;
+  const fetchTasks = [];
   for (const domain of domains) {
     const ids = Array.isArray(FLAG_IDS_BY_DOMAIN[domain])
       ? FLAG_IDS_BY_DOMAIN[domain]
@@ -265,17 +266,20 @@ async function loadFlagInfo() {
     for (const id of validIds) {
       renderFlagBlock({ domain, id, status: "loading" });
     }
-    const flagInfos = await Promise.all(
-      validIds.map((id) => fetchFlagInfo(domain, id))
-    );
-    for (const flagInfo of flagInfos) {
-      renderFlagBlock(flagInfo);
+    for (const id of validIds) {
+      const task = fetchFlagInfo(domain, id).then((flagInfo) => {
+        renderFlagBlock(flagInfo);
+      });
+      fetchTasks.push(task);
     }
   }
 
   if (!renderedAny) {
     setError("No valid flag IDs configured.");
+    return;
   }
+
+  await Promise.all(fetchTasks);
 }
 
 void loadFlagInfo();
