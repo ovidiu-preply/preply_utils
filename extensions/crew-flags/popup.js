@@ -1,5 +1,6 @@
 const TRACKED_IDS_STORAGE_KEY = "trackedFlagIdsByDomain";
 const FLAG_CACHE_STORAGE_KEY = "flagInfoByDomain";
+const STALE_FETCH_THRESHOLD_MS = 2 * 60 * 1000;
 const domainUiByDomain = new Map();
 let trackedFlagIdsByDomain = {};
 let flagInfoByDomain = {};
@@ -68,6 +69,10 @@ function sanitizeFlagInfo(rawInfo) {
   }
 
   const sanitized = { status };
+  const rawLastFetchedAt = rawInfo.lastFetchedAt;
+  if (typeof rawLastFetchedAt === "number" && Number.isFinite(rawLastFetchedAt) && rawLastFetchedAt > 0) {
+    sanitized.lastFetchedAt = rawLastFetchedAt;
+  }
   if (status === "ok") {
     sanitized.flagName = sanitizeFieldValue(rawInfo.flagName).displayValue;
     sanitized.everyone = sanitizeFieldValue(rawInfo.everyone);
@@ -357,6 +362,57 @@ function createFlagNameBadge(label) {
   return badge;
 }
 
+function formatRelativeDuration(diffMs) {
+  const diffSeconds = Math.max(0, Math.floor(diffMs / 1000));
+  if (diffSeconds < 60) {
+    return `${diffSeconds}s ago`;
+  }
+
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  if (diffMinutes < 60) {
+    return `${diffMinutes}m ago`;
+  }
+
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) {
+    return `${diffHours}h ago`;
+  }
+
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
+function formatLastFetchedAt(lastFetchedAt) {
+  if (typeof lastFetchedAt !== "number" || !Number.isFinite(lastFetchedAt) || lastFetchedAt <= 0) {
+    return "";
+  }
+  return formatRelativeDuration(Date.now() - lastFetchedAt);
+}
+
+function updateLastFetchedLabel(label, lastFetchedAt) {
+  if (typeof lastFetchedAt !== "number" || !Number.isFinite(lastFetchedAt) || lastFetchedAt <= 0) {
+    label.textContent = "";
+    label.classList.remove("flag-last-fetched-stale");
+    label.removeAttribute("title");
+    return;
+  }
+
+  const ageMs = Date.now() - lastFetchedAt;
+  const isStale = ageMs >= STALE_FETCH_THRESHOLD_MS;
+  const relativeTime = formatLastFetchedAt(lastFetchedAt);
+  label.classList.toggle("flag-last-fetched-stale", isStale);
+  label.textContent = isStale ? `Fetched ${relativeTime} • stale` : `Fetched ${relativeTime}`;
+  label.title = `Last fetched: ${new Date(lastFetchedAt).toLocaleString()}`;
+}
+
+function updateAllLastFetchedLabels() {
+  const labels = document.querySelectorAll("[data-last-fetched-at]");
+  for (const label of labels) {
+    const rawTimestamp = Number.parseInt(label.getAttribute("data-last-fetched-at") || "", 10);
+    updateLastFetchedLabel(label, rawTimestamp);
+  }
+}
+
 function makeIconButton(button, { label, iconSrc, size = 14 }) {
   button.setAttribute("aria-label", label);
   button.title = label;
@@ -601,6 +657,13 @@ function renderFlagBlock(flagInfo) {
   }
 
   block.append(subList);
+  const lastFetchedLabel = document.createElement("div");
+  lastFetchedLabel.className = "flag-last-fetched";
+  if (typeof flagInfo.lastFetchedAt === "number" && Number.isFinite(flagInfo.lastFetchedAt)) {
+    lastFetchedLabel.setAttribute("data-last-fetched-at", String(flagInfo.lastFetchedAt));
+    updateLastFetchedLabel(lastFetchedLabel, flagInfo.lastFetchedAt);
+  }
+  block.append(lastFetchedLabel);
   if (!existingBlock) {
     domainFlagsList.append(block);
   }
@@ -623,12 +686,16 @@ function getTrackedIdsForDomain(domain) {
 async function fetchAndRenderFlag(domain, id) {
   renderFlagBlock({ domain, id, status: "loading" });
   const info = await fetchFlagInfo(domain, id);
-  renderFlagBlock(info);
+  const fetchedInfo = {
+    ...info,
+    lastFetchedAt: Date.now()
+  };
+  renderFlagBlock(fetchedInfo);
   if (!flagInfoByDomain[domain] || typeof flagInfoByDomain[domain] !== "object") {
     flagInfoByDomain[domain] = {};
   }
-  flagInfoByDomain[domain][id] = sanitizeFlagInfo(info);
-  return info;
+  flagInfoByDomain[domain][id] = sanitizeFlagInfo(fetchedInfo);
+  return fetchedInfo;
 }
 
 function renderCachedFlag(domain, id) {
@@ -823,3 +890,4 @@ async function loadFlagInfo() {
 }
 
 void loadFlagInfo();
+setInterval(updateAllLastFetchedLabels, 1000);
