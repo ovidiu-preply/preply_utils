@@ -100,6 +100,24 @@ function createFlagNameBadge(label) {
   return badge;
 }
 
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const helper = document.createElement("textarea");
+  helper.value = text;
+  helper.setAttribute("readonly", "");
+  helper.style.position = "fixed";
+  helper.style.opacity = "0";
+  helper.style.pointerEvents = "none";
+  document.body.append(helper);
+  helper.select();
+  document.execCommand("copy");
+  helper.remove();
+}
+
 function formatRelativeDuration(diffMs) {
   const diffSeconds = Math.max(0, Math.floor(diffMs / 1000));
   if (diffSeconds < 60) {
@@ -174,6 +192,10 @@ function makeRefreshIconButton(button, label) {
 
 function makeTrackIconButton(button, label) {
   makeIconButton(button, { label, iconSrc: "track-icon.png" });
+}
+
+function makeCopyIconButton(button, label) {
+  makeIconButton(button, { label, iconSrc: "copy-icon.png", size: 13 });
 }
 
 export function setRefreshButtonLoadingState(button, isLoading) {
@@ -385,7 +407,30 @@ export function renderFlagBlock(flagInfo, callbacks) {
   actionsGroup.className = "flag-actions";
   actionsGroup.append(title);
   if (inlineFlagName) {
-    titleRow.append(createFlagNameBadge(inlineFlagName));
+    const flagNameGroup = document.createElement("div");
+    flagNameGroup.className = "flag-name-group";
+    flagNameGroup.append(createFlagNameBadge(inlineFlagName));
+
+    const copyFlagNameButton = document.createElement("button");
+    copyFlagNameButton.className = "copy-flag-name-button";
+    copyFlagNameButton.type = "button";
+    makeCopyIconButton(copyFlagNameButton, "Copy flag name");
+    copyFlagNameButton.addEventListener("click", async () => {
+      try {
+        await copyTextToClipboard(inlineFlagName);
+        copyFlagNameButton.title = "Copied";
+        copyFlagNameButton.setAttribute("aria-label", "Copied");
+      } catch {
+        copyFlagNameButton.title = "Copy failed";
+        copyFlagNameButton.setAttribute("aria-label", "Copy failed");
+      }
+      setTimeout(() => {
+        copyFlagNameButton.title = "Copy flag name";
+        copyFlagNameButton.setAttribute("aria-label", "Copy flag name");
+      }, 1000);
+    });
+    flagNameGroup.append(copyFlagNameButton);
+    titleRow.append(flagNameGroup);
   }
   if (flagKey === state.highlightedFlagKey) {
     titleRow.append(createContextBadge("Current page flag"));
