@@ -285,9 +285,7 @@ function createStatusBadge(status) {
   }
 
   if (status === "ok") {
-    badge.textContent = "OK";
-    badge.style.color = "#1e7a1e";
-    return badge;
+    return null;
   }
 
   if (status === "not_found") {
@@ -310,6 +308,18 @@ function createStatusBadge(status) {
 function createContextBadge(label) {
   const badge = document.createElement("span");
   badge.className = "context-badge";
+  badge.textContent = label;
+  return badge;
+}
+
+function createFlagNameBadge(label) {
+  const badge = document.createElement("span");
+  badge.className = "value-badge";
+  badge.style.fontSize = "13px";
+  badge.style.marginRight = "6px";
+  badge.style.color = "#0f766e";
+  badge.style.background = "#ccfbf1";
+  badge.style.borderColor = "#5eead4";
   badge.textContent = label;
   return badge;
 }
@@ -500,11 +510,21 @@ function renderFlagBlock(flagInfo) {
   title.href = targetUrl;
   title.target = "_blank";
   title.rel = "noopener noreferrer";
-  title.textContent = `Flag ID ${flagInfo.id}`;
+  const inlineFlagName =
+    flagInfo.status === "ok" && typeof flagInfo.flagName === "string"
+      ? normalizeText(flagInfo.flagName)
+      : "";
+  title.textContent = `ID ${flagInfo.id}`;
 
   const status = flagInfo.status || "fetch_failed";
   const statusBadge = createStatusBadge(status);
-  titleRow.append(title, statusBadge);
+
+  const actionsGroup = document.createElement("div");
+  actionsGroup.className = "flag-actions";
+  actionsGroup.append(title);
+  if (inlineFlagName) {
+    titleRow.append(createFlagNameBadge(inlineFlagName));
+  }
   if (flagKey === highlightedFlagKey) {
     titleRow.append(createContextBadge("Current page flag"));
   }
@@ -522,7 +542,11 @@ function renderFlagBlock(flagInfo) {
       }
     })();
   });
-  titleRow.append(removeButton);
+  if (statusBadge) {
+    actionsGroup.append(statusBadge);
+  }
+  actionsGroup.append(removeButton);
+  titleRow.append(actionsGroup);
   block.append(titleRow);
   block.classList.add("flag-card");
 
@@ -536,7 +560,6 @@ function renderFlagBlock(flagInfo) {
   } else if (status === "fetch_failed") {
     subList.append(createValueLine("Error", flagInfo.error));
   } else if (status === "ok") {
-    subList.append(createValueLine("Flag name", flagInfo.flagName));
     subList.append(
       createValueLine("Everyone - used to control the rollout", flagInfo.everyone)
     );
