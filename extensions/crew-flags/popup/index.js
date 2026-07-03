@@ -12,8 +12,10 @@ import {
 } from "./constants.js";
 import { fetchFlagInfo, getCurrentTabInfo, getDomainsForRender, isSupportedDomain } from "./fetching.js";
 import {
+  normalizeText,
   sanitizeCollapsedDomainsByDomain,
   sanitizeExperimentSetupByDomain,
+  sanitizeFieldValue,
   sanitizeFlagInfo,
   sanitizeFlagInfoByDomain,
   sanitizeTrackedIdsByDomain
@@ -416,6 +418,63 @@ function createExperimentDeleteIconButton() {
   return button;
 }
 
+function formatExperimentInlineMetric(rawValue) {
+  const displayValue = normalizeText(sanitizeFieldValue(rawValue).displayValue);
+  return displayValue || "-";
+}
+
+function getExperimentFlagMetrics(flagId) {
+  const domainFlagInfo = state.flagInfoByDomain[EXPERIMENT_SETUP_DOMAIN];
+  if (!domainFlagInfo || typeof domainFlagInfo !== "object") {
+    return null;
+  }
+  const info = sanitizeFlagInfo(domainFlagInfo[flagId]);
+  if (!info || info.status !== "ok") {
+    return null;
+  }
+  return {
+    everyone: formatExperimentInlineMetric(info.everyone),
+    percent: formatExperimentInlineMetric(info.percent),
+    audiencePercent: formatExperimentInlineMetric(info.audiencePercent)
+  };
+}
+
+function createExperimentFlagInlineMeta(flagId) {
+  const metrics = getExperimentFlagMetrics(flagId);
+  const container = document.createElement("div");
+  container.className = "experiment-flag-inline-meta";
+  const values = metrics
+    ? [metrics.everyone, metrics.percent, metrics.audiencePercent]
+    : ["-", "-", "-"];
+  for (const value of values) {
+    const item = document.createElement("span");
+    item.className = "experiment-flag-inline-meta-item";
+    item.textContent = value;
+    container.append(item);
+  }
+  return container;
+}
+
+function createExperimentFlagDetails(selectedFlag) {
+  const details = document.createElement("div");
+  details.className = "experiment-field-selected-details";
+  const badge = document.createElement("span");
+  badge.className = "value-badge";
+  badge.textContent = `${selectedFlag.name} (ID ${selectedFlag.id})`;
+  details.append(badge, createExperimentFlagInlineMeta(selectedFlag.id));
+  return details;
+}
+
+function appendSelectedExperimentFlag(fieldValue, selectedFlag, sectionId, fieldKey) {
+  fieldValue.className = "experiment-field-selected";
+  const details = createExperimentFlagDetails(selectedFlag);
+  const removeButton = createExperimentDeleteIconButton();
+  removeButton.addEventListener("click", () => {
+    void handleClearExperimentFlag(sectionId, fieldKey);
+  });
+  fieldValue.append(details, removeButton);
+}
+
 function getDerivedExperimentNameParts(experimentName) {
   if (typeof experimentName !== "string") {
     return null;
@@ -658,13 +717,21 @@ function renderExperimentSetupSection() {
     const item = document.createElement("li");
     item.className = "experiment-section-card";
 
+    const sectionExperimentFlagId = normalizeId(section.experimentFlagId);
+    const sectionExperimentFlag =
+      sectionExperimentFlagId !== null ? optionsById.get(sectionExperimentFlagId) : null;
     const title = document.createElement("h3");
     title.className = "experiment-section-title";
-    const sectionName = normalizeId(section.experimentFlagId)
-      ? optionsById.get(section.experimentFlagId)?.name || `Section ${sectionIndex + 1}`
+    const sectionName = sectionExperimentFlagId
+      ? sectionExperimentFlag?.name || `Section ${sectionIndex + 1}`
       : `Section ${sectionIndex + 1}`;
     title.textContent = sectionName;
     item.append(title);
+    if (sectionExperimentFlag) {
+      const sectionExperimentMeta = createExperimentFlagDetails(sectionExperimentFlag);
+      sectionExperimentMeta.classList.add("experiment-section-main-flag");
+      item.append(sectionExperimentMeta);
+    }
 
     for (const field of EXPERIMENT_SECTION_FIELDS) {
       const row = document.createElement("div");
@@ -682,15 +749,7 @@ function renderExperimentSetupSection() {
 
       if (isAaField && hasSelectedValue) {
         label.textContent = "AA experiment";
-        fieldValue.className = "experiment-field-selected";
-        const badge = document.createElement("span");
-        badge.className = "value-badge";
-        badge.textContent = `${selectedFlag.name} (ID ${selectedFlag.id})`;
-        const removeButton = createExperimentDeleteIconButton();
-        removeButton.addEventListener("click", () => {
-          void handleClearExperimentFlag(section.id, field.key);
-        });
-        fieldValue.append(badge, removeButton);
+        appendSelectedExperimentFlag(fieldValue, selectedFlag, section.id, field.key);
       } else if (isAaField) {
         label.classList.add("experiment-field-label-with-checkbox");
         const labelText = document.createElement("span");
@@ -737,15 +796,7 @@ function renderExperimentSetupSection() {
         label.textContent = field.label;
 
         if (hasSelectedValue) {
-          fieldValue.className = "experiment-field-selected";
-          const badge = document.createElement("span");
-          badge.className = "value-badge";
-          badge.textContent = `${selectedFlag.name} (ID ${selectedFlag.id})`;
-          const removeButton = createExperimentDeleteIconButton();
-          removeButton.addEventListener("click", () => {
-            void handleClearExperimentFlag(section.id, field.key);
-          });
-          fieldValue.append(badge, removeButton);
+          appendSelectedExperimentFlag(fieldValue, selectedFlag, section.id, field.key);
         } else {
           const select = document.createElement("select");
           select.className = "experiment-field-select";

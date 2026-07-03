@@ -180,6 +180,10 @@
         font-weight: 700;
       }
 
+      .experiment-section-main-flag {
+        margin: -2px 0 8px;
+      }
+
       .experiment-field-row {
         display: grid;
         grid-template-columns: 130px 1fr;
@@ -222,8 +226,36 @@
 
       .experiment-field-selected {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         gap: 8px;
+      }
+
+      .experiment-field-selected-details {
+        display: inline-flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      .experiment-flag-inline-meta {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        flex-wrap: wrap;
+      }
+
+      .experiment-flag-inline-meta-item {
+        display: inline-flex;
+        align-items: center;
+        font-size: 10px;
+        font-weight: 600;
+        line-height: 1.2;
+        color: #475569;
+        background: #f1f5f9;
+        border: 1px solid #e2e8f0;
+        border-radius: 999px;
+        padding: 1px 6px;
       }
 
       .experiment-field-remove-button {
