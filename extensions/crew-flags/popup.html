@@ -180,6 +180,46 @@
         font-weight: 700;
       }
 
+      .experiment-section-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 8px;
+      }
+
+      .experiment-section-header .experiment-section-title {
+        margin: 0;
+      }
+
+      .experiment-section-remove-icon-button {
+        margin-left: auto;
+        width: 24px;
+        height: 24px;
+        padding: 4px;
+        border: none;
+        background: transparent;
+        border-radius: 6px;
+        cursor: pointer;
+        line-height: 0;
+        opacity: 0.85;
+      }
+
+      .experiment-section-remove-icon-button:hover {
+        background: #fee2e2;
+        opacity: 1;
+      }
+
+      .experiment-section-remove-icon-button:focus-visible {
+        outline: 2px solid #ef4444;
+        outline-offset: 1px;
+      }
+
+      .experiment-section-remove-icon-button img {
+        width: 16px;
+        height: 16px;
+        display: block;
+      }
+
       .experiment-section-main-flag {
         margin: -2px 0 8px;
       }
@@ -298,27 +338,6 @@
       .experiment-field-remove-button:hover {
         background: #fef2f2;
         opacity: 1;
-      }
-
-      .experiment-section-actions {
-        margin-top: 8px;
-        display: flex;
-        justify-content: flex-end;
-      }
-
-      .experiment-section-remove-button {
-        border: 1px solid #fecaca;
-        border-radius: 6px;
-        background: #fff;
-        color: #991b1b;
-        font-size: 11px;
-        font-weight: 600;
-        padding: 2px 8px;
-        cursor: pointer;
-      }
-
-      .experiment-section-remove-button:hover {
-        background: #fef2f2;
       }
 
       .settings-grid {

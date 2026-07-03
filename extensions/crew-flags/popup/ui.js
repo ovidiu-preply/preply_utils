@@ -212,7 +212,7 @@ function makeIconButton(button, { label, iconSrc, size = 14 }) {
   button.append(icon);
 }
 
-function makeDeleteIconButton(button, label) {
+export function makeDeleteIconButton(button, label) {
   makeIconButton(button, { label, iconSrc: "delete-icon.png" });
 }
 

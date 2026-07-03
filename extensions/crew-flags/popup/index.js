@@ -25,6 +25,7 @@ import { getFromStorage, setInStorage } from "./storage.js";
 import {
   clearFields,
   getFlagKey,
+  makeDeleteIconButton,
   renderDomainSection,
   renderFlagBlock,
   setError,
@@ -888,13 +889,23 @@ function renderExperimentSetupSection() {
     const sectionExperimentFlagId = normalizeId(section.experimentFlagId);
     const sectionExperimentFlag =
       sectionExperimentFlagId !== null ? optionsById.get(sectionExperimentFlagId) : null;
+    const header = document.createElement("div");
+    header.className = "experiment-section-header";
     const title = document.createElement("h3");
     title.className = "experiment-section-title";
     const sectionName = sectionExperimentFlagId
       ? sectionExperimentFlag?.name || `Section ${sectionIndex + 1}`
       : `Section ${sectionIndex + 1}`;
     title.textContent = sectionName;
-    item.append(title);
+    const removeSectionButton = document.createElement("button");
+    removeSectionButton.className = "experiment-section-remove-icon-button";
+    removeSectionButton.type = "button";
+    makeDeleteIconButton(removeSectionButton, "Remove section");
+    removeSectionButton.addEventListener("click", () => {
+      void handleRemoveExperimentSection(section.id);
+    });
+    header.append(title, removeSectionButton);
+    item.append(header);
     if (sectionExperimentFlag) {
       const sectionExperimentValidation = getExperimentFlagValidationState(
         section,
@@ -1022,18 +1033,6 @@ function renderExperimentSetupSection() {
       row.append(label, fieldValue);
       item.append(row);
     }
-
-    const sectionActions = document.createElement("div");
-    sectionActions.className = "experiment-section-actions";
-    const removeSectionButton = document.createElement("button");
-    removeSectionButton.className = "experiment-section-remove-button";
-    removeSectionButton.type = "button";
-    removeSectionButton.textContent = "Remove section";
-    removeSectionButton.addEventListener("click", () => {
-      void handleRemoveExperimentSection(section.id);
-    });
-    sectionActions.append(removeSectionButton);
-    item.append(sectionActions);
 
     listElement.append(item);
   }
