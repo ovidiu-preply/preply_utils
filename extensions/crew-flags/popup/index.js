@@ -36,7 +36,12 @@ function normalizeId(id) {
 }
 
 const EXPERIMENT_SETUP_DOMAIN = "crew.preply.com";
-let pendingExperimentRemoveId = null;
+const EXPERIMENT_SECTION_FIELDS = [
+  { key: "rolloutFlagId", label: "Rollout flag" },
+  { key: "studentAFlagId", label: "Student A flag" },
+  { key: "studentBFlagId", label: "Student B flag" },
+  { key: "aaFlagId", label: "AA experiment" }
+];
 
 function sanitizePopupDimension(value, fallbackValue, maxValue) {
   const parsedValue = Number.parseInt(String(value), 10);
@@ -233,7 +238,18 @@ function getTrackedIdsForDomain(domain) {
     : [];
 }
 
-function getExperimentSetupIdsForDomain(domain) {
+function createEmptyExperimentSection(sectionId) {
+  return {
+    id: sectionId,
+    experimentFlagId: null,
+    rolloutFlagId: null,
+    studentAFlagId: null,
+    studentBFlagId: null,
+    aaFlagId: null
+  };
+}
+
+function getExperimentSectionsForDomain(domain) {
   return Array.isArray(state.experimentSetupByDomain[domain]) ? state.experimentSetupByDomain[domain] : [];
 }
 
@@ -248,9 +264,6 @@ function getExperimentFlagOptions() {
   for (const id of trackedIds) {
     const info = sanitizeFlagInfo(domainFlagInfo[id]);
     if (!info || info.status !== "ok" || typeof info.flagName !== "string") {
-      continue;
-    }
-    if (!info.flagName.startsWith("exp_")) {
       continue;
     }
     options.push({
@@ -273,177 +286,442 @@ function getExperimentFlagOptions() {
 function reconcileExperimentSetup() {
   const options = getExperimentFlagOptions();
   const optionIds = new Set(options.map((option) => option.id));
-  const selectedIds = getExperimentSetupIdsForDomain(EXPERIMENT_SETUP_DOMAIN);
-  const filteredIds = selectedIds.filter((id) => optionIds.has(id));
-  const hasChanged = filteredIds.length !== selectedIds.length;
+  const optionsById = new Map(options.map((option) => [option.id, option]));
+  const currentSections = getExperimentSectionsForDomain(EXPERIMENT_SETUP_DOMAIN);
+  const normalizedSections = [];
+  const usedParentIds = new Set();
+  const usedFieldIds = new Set();
+  let hasChanged = false;
+
+  for (const section of currentSections) {
+    const sectionId = normalizeId(section?.id) ?? normalizedSections.length + 1;
+    const nextSection = createEmptyExperimentSection(sectionId);
+    const experimentFlagId = normalizeId(section?.experimentFlagId);
+    const experimentOption = experimentFlagId !== null ? optionsById.get(experimentFlagId) : null;
+    if (
+      experimentFlagId !== null &&
+      optionIds.has(experimentFlagId) &&
+      experimentOption &&
+      experimentOption.name.startsWith("exp_") &&
+      !usedParentIds.has(experimentFlagId)
+    ) {
+      nextSection.experimentFlagId = experimentFlagId;
+      usedParentIds.add(experimentFlagId);
+    } else if (experimentFlagId !== null) {
+      hasChanged = true;
+    }
+    for (const field of EXPERIMENT_SECTION_FIELDS) {
+      const rawId = normalizeId(section?.[field.key]);
+      const option = rawId !== null ? optionsById.get(rawId) : null;
+      const hasValidPrefix =
+        option &&
+        (field.key === "aaFlagId" ? option.name.startsWith("exp_") : option.name.startsWith("flag_"));
+      const isSameAsSectionParent =
+        field.key === "aaFlagId" && rawId !== null && rawId === normalizeId(nextSection.experimentFlagId);
+      const isAvailable =
+        rawId !== null &&
+        optionIds.has(rawId) &&
+        Boolean(hasValidPrefix) &&
+        !usedFieldIds.has(rawId) &&
+        !isSameAsSectionParent;
+      if (isAvailable) {
+        nextSection[field.key] = rawId;
+        usedFieldIds.add(rawId);
+      } else if (rawId !== null) {
+        hasChanged = true;
+      }
+    }
+    normalizedSections.push(nextSection);
+  }
+
+  if (normalizedSections.length !== currentSections.length) {
+    hasChanged = true;
+  }
   if (hasChanged) {
-    state.experimentSetupByDomain[EXPERIMENT_SETUP_DOMAIN] = filteredIds;
+    state.experimentSetupByDomain[EXPERIMENT_SETUP_DOMAIN] = normalizedSections;
     void saveExperimentSetup();
   }
-  return options;
+  return {
+    options,
+    sections: hasChanged ? normalizedSections : currentSections
+  };
+}
+
+function getUsedExperimentFieldIds(sections, ignoredSectionId, ignoredFieldKey) {
+  const usedIds = new Set();
+  for (const section of sections) {
+    for (const field of EXPERIMENT_SECTION_FIELDS) {
+      if (section.id === ignoredSectionId && field.key === ignoredFieldKey) {
+        continue;
+      }
+      const id = normalizeId(section[field.key]);
+      if (id !== null) {
+        usedIds.add(id);
+      }
+    }
+  }
+  return usedIds;
+}
+
+function getUsedSectionParentExperimentIds(sections) {
+  const usedParentIds = new Set();
+  for (const section of sections) {
+    const experimentFlagId = normalizeId(section.experimentFlagId);
+    if (experimentFlagId !== null) {
+      usedParentIds.add(experimentFlagId);
+    }
+  }
+  return usedParentIds;
+}
+
+function getTopExpSeedOptions(options, sections) {
+  const usedIds = getUsedSectionParentExperimentIds(sections);
+  return options.filter((option) => option.name.startsWith("exp_") && !usedIds.has(option.id));
+}
+
+function getFieldOptions(options, sections, sectionId, fieldKey) {
+  const usedIds = getUsedExperimentFieldIds(sections, sectionId, fieldKey);
+  const currentSection = sections.find((section) => section.id === sectionId);
+  const currentSectionParentId = normalizeId(currentSection?.experimentFlagId);
+  if (fieldKey === "aaFlagId") {
+    return options.filter(
+      (option) =>
+        option.name.startsWith("exp_") &&
+        !usedIds.has(option.id) &&
+        option.id !== currentSectionParentId
+    );
+  }
+  return options.filter((option) => option.name.startsWith("flag_") && !usedIds.has(option.id));
+}
+
+function createExperimentDeleteIconButton() {
+  const button = document.createElement("button");
+  button.className = "experiment-field-remove-button";
+  button.type = "button";
+  button.setAttribute("aria-label", "Clear selected flag");
+  button.title = "Clear selected flag";
+
+  const icon = document.createElement("img");
+  icon.src = "delete-icon.png";
+  icon.alt = "";
+  button.append(icon);
+  return button;
+}
+
+function getDerivedExperimentNameParts(experimentName) {
+  if (typeof experimentName !== "string") {
+    return null;
+  }
+  const aaMatch = /^exp_(.+)_tutor_AA$/u.exec(experimentName);
+  if (aaMatch) {
+    const experimentBaseName = aaMatch[1];
+    if (!experimentBaseName) {
+      return null;
+    }
+    return {
+      rollout: `flag_${experimentBaseName}_rollout_AA`,
+      studentA: `flag_${experimentBaseName}_student_group_A_AA`,
+      studentB: `flag_${experimentBaseName}_student_group_B_AA`,
+      aa: null
+    };
+  }
+
+  const mainMatch = /^exp_(.+)_tutor$/u.exec(experimentName);
+  if (!mainMatch) {
+    return null;
+  }
+  const experimentBaseName = mainMatch[1];
+  if (!experimentBaseName) {
+    return null;
+  }
+  return {
+    rollout: `flag_${experimentBaseName}_rollout`,
+    studentA: `flag_${experimentBaseName}_student_group_A`,
+    studentB: `flag_${experimentBaseName}_student_group_B`,
+    aa: `exp_${experimentBaseName}_tutor_AA`
+  };
+}
+
+function autoAssignExperimentSectionFlags(section, options, sections) {
+  const experimentFlagId = normalizeId(section.experimentFlagId);
+  if (experimentFlagId === null) {
+    return;
+  }
+  const optionsById = new Map(options.map((option) => [option.id, option]));
+  const optionsByName = new Map(options.map((option) => [option.name, option]));
+  const experimentOption = optionsById.get(experimentFlagId);
+  const expectedNames = getDerivedExperimentNameParts(experimentOption?.name);
+  if (!expectedNames) {
+    return;
+  }
+
+  const usedIds = getUsedExperimentFieldIds(sections, section.id, null);
+  const tryAssign = (fieldKey, expectedName, expectedPrefix) => {
+    if (typeof expectedName !== "string" || expectedName.length === 0) {
+      return;
+    }
+    if (normalizeId(section[fieldKey]) !== null) {
+      return;
+    }
+    const option = optionsByName.get(expectedName);
+    if (!option || !option.name.startsWith(expectedPrefix)) {
+      return;
+    }
+    if (usedIds.has(option.id)) {
+      return;
+    }
+    section[fieldKey] = option.id;
+    usedIds.add(option.id);
+  };
+
+  tryAssign("rolloutFlagId", expectedNames.rollout, "flag_");
+  tryAssign("studentAFlagId", expectedNames.studentA, "flag_");
+  tryAssign("studentBFlagId", expectedNames.studentB, "flag_");
+  tryAssign("aaFlagId", expectedNames.aa, "exp_");
+}
+
+async function handleSelectExperimentFlag(sectionId, fieldKey, rawFlagId) {
+  const selectedFlagId = normalizeId(Number.parseInt(String(rawFlagId), 10));
+  if (selectedFlagId === null) {
+    return;
+  }
+
+  const availableFlagIds = new Set(getExperimentFlagOptions().map((option) => option.id));
+  if (!availableFlagIds.has(selectedFlagId)) {
+    setError("Selected flag is not available.");
+    return;
+  }
+
+  const sections = getExperimentSectionsForDomain(EXPERIMENT_SETUP_DOMAIN);
+  const section = sections.find((currentSection) => currentSection.id === sectionId);
+  if (!section) {
+    return;
+  }
+
+  const usedIds = getUsedExperimentFieldIds(sections, sectionId, fieldKey);
+  if (usedIds.has(selectedFlagId)) {
+    setError("Flag already selected in another dropdown.");
+    return;
+  }
+
+  if (fieldKey === "aaFlagId" && selectedFlagId === normalizeId(section.experimentFlagId)) {
+    setError("AA experiment cannot match the section parent experiment.");
+    return;
+  }
+
+  const availableOptions = getFieldOptions(getExperimentFlagOptions(), sections, sectionId, fieldKey);
+  if (!availableOptions.some((option) => option.id === selectedFlagId)) {
+    setError("Selected flag is not valid for this field.");
+    return;
+  }
+
+  section[fieldKey] = selectedFlagId;
+  try {
+    await saveExperimentSetup();
+    renderExperimentSetupSection();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    setError(`Cannot save experiment setup: ${message}`);
+  }
+}
+
+async function handleClearExperimentFlag(sectionId, fieldKey) {
+  const sections = getExperimentSectionsForDomain(EXPERIMENT_SETUP_DOMAIN);
+  const section = sections.find((currentSection) => currentSection.id === sectionId);
+  if (!section) {
+    return;
+  }
+  section[fieldKey] = null;
+  try {
+    await saveExperimentSetup();
+    renderExperimentSetupSection();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    setError(`Cannot save experiment setup: ${message}`);
+  }
+}
+
+async function handleAddExperimentSection(rawExperimentFlagId) {
+  const experimentFlagId = normalizeId(Number.parseInt(String(rawExperimentFlagId), 10));
+  if (experimentFlagId === null) {
+    return;
+  }
+
+  const sections = getExperimentSectionsForDomain(EXPERIMENT_SETUP_DOMAIN);
+  const availableSeedIds = new Set(getTopExpSeedOptions(getExperimentFlagOptions(), sections).map((option) => option.id));
+  if (!availableSeedIds.has(experimentFlagId)) {
+    setError("Selected main exp flag is not available.");
+    return;
+  }
+
+  const nextSectionId =
+    sections.reduce((maxId, section) => Math.max(maxId, normalizeId(section.id) || 0), 0) + 1;
+  const newSection = createEmptyExperimentSection(nextSectionId);
+  newSection.experimentFlagId = experimentFlagId;
+  autoAssignExperimentSectionFlags(newSection, getExperimentFlagOptions(), sections);
+  state.experimentSetupByDomain[EXPERIMENT_SETUP_DOMAIN] = [
+    ...sections,
+    newSection
+  ];
+  try {
+    await saveExperimentSetup();
+    renderExperimentSetupSection();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    setError(`Cannot save experiment setup: ${message}`);
+  }
+}
+
+async function handleRemoveExperimentSection(sectionId) {
+  const sections = getExperimentSectionsForDomain(EXPERIMENT_SETUP_DOMAIN);
+  const nextSections = sections.filter((section) => section.id !== sectionId);
+  if (nextSections.length === sections.length) {
+    return;
+  }
+  state.experimentSetupByDomain[EXPERIMENT_SETUP_DOMAIN] = nextSections;
+  try {
+    await saveExperimentSetup();
+    renderExperimentSetupSection();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    setError(`Cannot save experiment setup: ${message}`);
+  }
 }
 
 function renderExperimentSetupSection() {
-  const selectElement = document.getElementById("experiment-flag-select");
-  const addButton = document.getElementById("experiment-setup-add-button");
+  const addSectionButton = document.getElementById("experiment-setup-add-section-button");
+  const createSelect = document.getElementById("experiment-setup-create-select");
   const listElement = document.getElementById("experiment-setup-list");
   const emptyElement = document.getElementById("experiment-setup-empty");
   if (
-    !(selectElement instanceof HTMLSelectElement) ||
-    !(addButton instanceof HTMLButtonElement) ||
+    !(addSectionButton instanceof HTMLButtonElement) ||
+    !(createSelect instanceof HTMLSelectElement) ||
     !(listElement instanceof HTMLElement) ||
     !(emptyElement instanceof HTMLElement)
   ) {
     return;
   }
 
-  const options = reconcileExperimentSetup();
-  const selectedIds = getExperimentSetupIdsForDomain(EXPERIMENT_SETUP_DOMAIN);
-  const selectedIdSet = new Set(selectedIds);
-
-  selectElement.replaceChildren();
-  const selectableOptions = options.filter((option) => !selectedIdSet.has(option.id));
-  if (selectableOptions.length === 0) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "No tracked exp_ flags available";
-    selectElement.append(option);
-    selectElement.disabled = true;
-    addButton.disabled = true;
-  } else {
-    for (const optionInfo of selectableOptions) {
-      const option = document.createElement("option");
-      option.value = String(optionInfo.id);
-      option.textContent = `${optionInfo.name} (ID ${optionInfo.id})`;
-      selectElement.append(option);
-    }
-    selectElement.disabled = false;
-    addButton.disabled = false;
+  const { options, sections } = reconcileExperimentSetup();
+  const optionsById = new Map(options.map((option) => [option.id, option]));
+  const previousCreateValue = createSelect.value;
+  const seedOptions = getTopExpSeedOptions(options, sections);
+  createSelect.replaceChildren();
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "";
+  defaultOption.textContent = "Select main exp flag";
+  createSelect.append(defaultOption);
+  for (const option of seedOptions) {
+    const optionElement = document.createElement("option");
+    optionElement.value = String(option.id);
+    optionElement.textContent = `${option.name} (ID ${option.id})`;
+    createSelect.append(optionElement);
   }
+  if (seedOptions.some((option) => String(option.id) === previousCreateValue)) {
+    createSelect.value = previousCreateValue;
+  }
+  const canAddSection = seedOptions.length > 0;
+  addSectionButton.disabled = !canAddSection;
+  createSelect.disabled = !canAddSection;
 
   listElement.replaceChildren();
-  const selectedById = new Map(options.map((option) => [option.id, option]));
-  for (const id of selectedIds) {
-    const option = selectedById.get(id);
-    if (!option) {
-      continue;
-    }
-
+  for (const [sectionIndex, section] of sections.entries()) {
     const item = document.createElement("li");
-    item.className = "experiment-setup-item";
+    item.className = "experiment-section-card";
 
-    const itemLabel = document.createElement("div");
-    itemLabel.className = "experiment-setup-item-label";
-    itemLabel.textContent = `${option.name} (ID ${id})`;
+    const title = document.createElement("h3");
+    title.className = "experiment-section-title";
+    const sectionName = normalizeId(section.experimentFlagId)
+      ? optionsById.get(section.experimentFlagId)?.name || `Section ${sectionIndex + 1}`
+      : `Section ${sectionIndex + 1}`;
+    title.textContent = sectionName;
+    item.append(title);
 
-    const actions = document.createElement("div");
-    actions.className = "experiment-setup-item-actions";
-    if (pendingExperimentRemoveId === id) {
-      const confirmButton = document.createElement("button");
-      confirmButton.className = "experiment-setup-confirm-button";
-      confirmButton.type = "button";
-      confirmButton.textContent = "Confirm";
-      confirmButton.addEventListener("click", () => {
-        void handleRemoveExperimentFlag(id);
-      });
+    for (const field of EXPERIMENT_SECTION_FIELDS) {
+      const row = document.createElement("div");
+      row.className = "experiment-field-row";
 
-      const cancelButton = document.createElement("button");
-      cancelButton.className = "experiment-setup-cancel-button";
-      cancelButton.type = "button";
-      cancelButton.textContent = "Cancel";
-      cancelButton.addEventListener("click", () => {
-        pendingExperimentRemoveId = null;
-        renderExperimentSetupSection();
-      });
+      const label = document.createElement("div");
+      label.className = "experiment-field-label";
+      label.textContent = field.label;
 
-      actions.append(confirmButton, cancelButton);
-    } else {
-      const removeButton = document.createElement("button");
-      removeButton.className = "experiment-setup-remove-button";
-      removeButton.type = "button";
-      removeButton.textContent = "Remove";
-      removeButton.addEventListener("click", () => {
-        pendingExperimentRemoveId = id;
-        renderExperimentSetupSection();
-      });
-      actions.append(removeButton);
+      const selectedFlagId = normalizeId(section[field.key]);
+      const selectedFlag = selectedFlagId !== null ? optionsById.get(selectedFlagId) : null;
+      const fieldValue = document.createElement("div");
+
+      if (selectedFlagId !== null && selectedFlag) {
+        fieldValue.className = "experiment-field-selected";
+        const badge = document.createElement("span");
+        badge.className = "value-badge";
+        badge.textContent = `${selectedFlag.name} (ID ${selectedFlag.id})`;
+        const removeButton = createExperimentDeleteIconButton();
+        removeButton.addEventListener("click", () => {
+          void handleClearExperimentFlag(section.id, field.key);
+        });
+        fieldValue.append(badge, removeButton);
+      } else {
+        const select = document.createElement("select");
+        select.className = "experiment-field-select";
+        const defaultOption = document.createElement("option");
+        defaultOption.value = "";
+        defaultOption.textContent = "Select flag";
+        select.append(defaultOption);
+
+        const availableOptions = getFieldOptions(options, sections, section.id, field.key);
+        for (const option of availableOptions) {
+          const optionElement = document.createElement("option");
+          optionElement.value = String(option.id);
+          optionElement.textContent = `${option.name} (ID ${option.id})`;
+          select.append(optionElement);
+        }
+        select.disabled = availableOptions.length === 0;
+        select.addEventListener("change", () => {
+          void handleSelectExperimentFlag(section.id, field.key, select.value);
+        });
+        fieldValue.append(select);
+      }
+
+      row.append(label, fieldValue);
+      item.append(row);
     }
 
-    item.append(itemLabel, actions);
+    const sectionActions = document.createElement("div");
+    sectionActions.className = "experiment-section-actions";
+    const removeSectionButton = document.createElement("button");
+    removeSectionButton.className = "experiment-section-remove-button";
+    removeSectionButton.type = "button";
+    removeSectionButton.textContent = "Remove section";
+    removeSectionButton.addEventListener("click", () => {
+      void handleRemoveExperimentSection(section.id);
+    });
+    sectionActions.append(removeSectionButton);
+    item.append(sectionActions);
+
     listElement.append(item);
   }
 
   emptyElement.toggleAttribute("hidden", listElement.childElementCount > 0);
 }
 
-async function handleAddExperimentFlag() {
-  setError("");
-  const selectElement = document.getElementById("experiment-flag-select");
-  if (!(selectElement instanceof HTMLSelectElement)) {
-    return;
-  }
-  const parsedId = Number.parseInt(selectElement.value, 10);
-  const selectedId = normalizeId(parsedId);
-  if (selectedId === null) {
-    return;
-  }
-
-  const selectedIds = getExperimentSetupIdsForDomain(EXPERIMENT_SETUP_DOMAIN);
-  if (selectedIds.includes(selectedId)) {
-    return;
-  }
-
-  const availableIdSet = new Set(getExperimentFlagOptions().map((option) => option.id));
-  if (!availableIdSet.has(selectedId)) {
-    setError("Flag not available for experiment setup.");
-    return;
-  }
-
-  state.experimentSetupByDomain[EXPERIMENT_SETUP_DOMAIN] = [...selectedIds, selectedId];
-  try {
-    await saveExperimentSetup();
-    renderExperimentSetupSection();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "unknown error";
-    setError(`Cannot save experiment setup: ${message}`);
-  }
-}
-
-async function handleRemoveExperimentFlag(id) {
-  const selectedIds = getExperimentSetupIdsForDomain(EXPERIMENT_SETUP_DOMAIN);
-  if (!selectedIds.includes(id)) {
-    return;
-  }
-
-  pendingExperimentRemoveId = null;
-  state.experimentSetupByDomain[EXPERIMENT_SETUP_DOMAIN] = selectedIds.filter(
-    (selectedId) => selectedId !== id
-  );
-  try {
-    await saveExperimentSetup();
-    renderExperimentSetupSection();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "unknown error";
-    setError(`Cannot save experiment setup: ${message}`);
-  }
-}
-
 function setupExperimentSetupUi() {
-  const addButton = document.getElementById("experiment-setup-add-button");
-  const selectElement = document.getElementById("experiment-flag-select");
-  if (!(addButton instanceof HTMLButtonElement) || !(selectElement instanceof HTMLSelectElement)) {
+  const addButton = document.getElementById("experiment-setup-add-section-button");
+  const createSelect = document.getElementById("experiment-setup-create-select");
+  if (!(addButton instanceof HTMLButtonElement) || !(createSelect instanceof HTMLSelectElement)) {
     return;
   }
 
+  const handleAdd = () => {
+    void handleAddExperimentSection(createSelect.value);
+  };
   addButton.addEventListener("click", () => {
-    void handleAddExperimentFlag();
+    handleAdd();
   });
-  selectElement.addEventListener("keydown", (event) => {
+  createSelect.addEventListener("keydown", (event) => {
     if (event.key !== "Enter") {
       return;
     }
     event.preventDefault();
-    void handleAddExperimentFlag();
+    handleAdd();
   });
 }
 

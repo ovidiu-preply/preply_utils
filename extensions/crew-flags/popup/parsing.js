@@ -62,11 +62,44 @@ export function sanitizeExperimentSetupByDomain(rawMap) {
     return sanitized;
   }
 
-  for (const [domain, ids] of Object.entries(rawMap)) {
+  const normalizeSection = (rawSection, fallbackId) => {
+    const legacyId = normalizeId(Number.parseInt(String(rawSection), 10));
+    const section = rawSection && typeof rawSection === "object" ? rawSection : {};
+    const parsedSectionId = normalizeId(Number.parseInt(String(section.id), 10)) ?? fallbackId;
+    const normalizeFlagId = (value) => normalizeId(Number.parseInt(String(value), 10));
+    const legacyExperimentId = legacyId !== null && (rawSection === legacyId || typeof rawSection === "number");
+    return {
+      id: parsedSectionId,
+      experimentFlagId: normalizeFlagId(section.experimentFlagId) ?? (legacyExperimentId ? legacyId : null),
+      rolloutFlagId: normalizeFlagId(section.rolloutFlagId),
+      studentAFlagId: normalizeFlagId(section.studentAFlagId),
+      studentBFlagId: normalizeFlagId(section.studentBFlagId),
+      aaFlagId: normalizeFlagId(section.aaFlagId)
+    };
+  };
+
+  for (const [domain, sections] of Object.entries(rawMap)) {
     if (typeof domain !== "string" || domain.trim() === "") {
       continue;
     }
-    sanitized[domain] = sanitizeIds(ids);
+
+    if (!Array.isArray(sections)) {
+      sanitized[domain] = [];
+      continue;
+    }
+
+    const normalizedSections = [];
+    const seenSectionIds = new Set();
+    for (const [index, section] of sections.entries()) {
+      const fallbackId = index + 1;
+      const normalizedSection = normalizeSection(section, fallbackId);
+      if (seenSectionIds.has(normalizedSection.id)) {
+        continue;
+      }
+      seenSectionIds.add(normalizedSection.id);
+      normalizedSections.push(normalizedSection);
+    }
+    sanitized[domain] = normalizedSections;
   }
 
   return sanitized;

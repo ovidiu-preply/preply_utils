@@ -121,20 +121,7 @@
         color: #374151;
       }
 
-      .experiment-setup-select-row {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-      }
-
-      .experiment-setup-select {
-        flex: 1;
-        box-sizing: border-box;
-        font-size: 12px;
-        padding: 5px 6px;
-      }
-
-      .experiment-setup-add-button {
+      .experiment-setup-add-section-button {
         height: 28px;
         border: 1px solid #cbd5e1;
         background: #fff;
@@ -145,9 +132,22 @@
         font-weight: 600;
       }
 
-      .experiment-setup-add-button:hover {
+      .experiment-setup-add-section-button:hover {
         background: #eef2ff;
         border-color: #c7d2fe;
+      }
+
+      .experiment-setup-create-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .experiment-setup-create-select {
+        flex: 1;
+        box-sizing: border-box;
+        font-size: 12px;
+        padding: 4px 6px;
       }
 
       .experiment-setup-empty {
@@ -162,71 +162,94 @@
         list-style: none;
       }
 
-      .experiment-setup-item {
+      .experiment-section-card {
+        border: 1px solid #e5e7eb;
+        background: #fff;
+        border-radius: 8px;
+        padding: 8px;
+      }
+
+      .experiment-section-card + .experiment-section-card {
+        margin-top: 8px;
+      }
+
+      .experiment-section-title {
+        margin: 0 0 8px;
+        font-size: 12px;
+        color: #1f2937;
+        font-weight: 700;
+      }
+
+      .experiment-field-row {
+        display: grid;
+        grid-template-columns: 130px 1fr;
+        column-gap: 8px;
+        align-items: center;
+      }
+
+      .experiment-field-row + .experiment-field-row {
+        margin-top: 6px;
+      }
+
+      .experiment-field-label {
+        font-size: 11px;
+        color: #4b5563;
+      }
+
+      .experiment-field-select {
+        width: 100%;
+        box-sizing: border-box;
+        font-size: 12px;
+        padding: 4px 6px;
+      }
+
+      .experiment-field-selected {
         display: flex;
         align-items: center;
         gap: 8px;
       }
 
-      .experiment-setup-item + .experiment-setup-item {
-        margin-top: 6px;
-      }
-
-      .experiment-setup-item-label {
-        min-width: 0;
-        flex: 1;
-        font-size: 12px;
-        color: #1f2937;
-        word-break: break-word;
-      }
-
-      .experiment-setup-item-actions {
-        margin-left: auto;
-        display: flex;
-        flex-direction: row;
-        align-items: center;
-        justify-content: flex-end;
-        gap: 4px;
-      }
-
-      .experiment-setup-remove-button {
-        border: 1px solid #fecaca;
-        color: #991b1b;
-        background: #fff;
+      .experiment-field-remove-button {
+        width: 22px;
+        height: 22px;
+        border: none;
+        background: transparent;
         border-radius: 6px;
         cursor: pointer;
-        font-size: 11px;
-        font-weight: 600;
-        padding: 2px 8px;
+        padding: 3px;
+        line-height: 0;
+        opacity: 0.85;
       }
 
-      .experiment-setup-remove-button:hover {
+      .experiment-field-remove-button img {
+        width: 14px;
+        height: 14px;
+        display: block;
+      }
+
+      .experiment-field-remove-button:hover {
         background: #fef2f2;
+        opacity: 1;
       }
 
-      .experiment-setup-confirm-button,
-      .experiment-setup-cancel-button {
-        border: 1px solid #d1d5db;
+      .experiment-section-actions {
+        margin-top: 8px;
+        display: flex;
+        justify-content: flex-end;
+      }
+
+      .experiment-section-remove-button {
+        border: 1px solid #fecaca;
         border-radius: 6px;
         background: #fff;
-        color: #1f2937;
+        color: #991b1b;
         font-size: 11px;
         font-weight: 600;
-        min-width: 62px;
         padding: 2px 8px;
         cursor: pointer;
       }
 
-      .experiment-setup-cancel-button:hover {
-        background: #f3f4f6;
-      }
-
-      .experiment-setup-confirm-button {
-        border-color: #fecaca;
-        color: #991b1b;
-      }
-
-      .experiment-setup-confirm-button:hover {
+      .experiment-section-remove-button:hover {
         background: #fef2f2;
       }
 
@@ -695,17 +718,21 @@
         hidden
       >
         <section class="experiment-setup-section">
-          <h2 class="experiment-setup-title">Pick experiment flag from crew.preply.com</h2>
-          <div class="experiment-setup-select-row">
-            <select id="experiment-flag-select" class="experiment-setup-select"></select>
-            <button id="experiment-setup-add-button" class="experiment-setup-add-button" type="button">
-              Add
+          <h2 class="experiment-setup-title">Experiment sections (crew.preply.com tracked flags)</h2>
+          <div class="experiment-setup-create-row">
+            <select id="experiment-setup-create-select" class="experiment-setup-create-select"></select>
+            <button
+              id="experiment-setup-add-section-button"
+              class="experiment-setup-add-section-button"
+              type="button"
+            >
+              Add experiment section
             </button>
           </div>
         </section>
         <section class="experiment-setup-section">
-          <h2 class="experiment-setup-title">Experiment setup selection</h2>
-          <p id="experiment-setup-empty" class="experiment-setup-empty">No experiment flags selected yet.</p>
+          <h2 class="experiment-setup-title">Configured sections</h2>
+          <p id="experiment-setup-empty" class="experiment-setup-empty">No experiment sections yet.</p>
           <ul id="experiment-setup-list" class="experiment-setup-list"></ul>
         </section>
       </section>
