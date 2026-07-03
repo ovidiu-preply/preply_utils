@@ -23,6 +23,19 @@
       "run_at": "document_idle"
     }
   ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "track-icon.png",
+        "icons/icon16.png",
+        "shared-tracking.js"
+      ],
+      "matches": [
+        "https://crew.preply.com/*",
+        "https://*.preply.org/*"
+      ]
+    }
+  ],
   "action": {
     "default_title": "crew-flags",
     "default_popup": "popup.html",

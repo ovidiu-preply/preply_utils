@@ -11,6 +11,7 @@ import {
   TRACKED_IDS_STORAGE_KEY
 } from "./constants.js";
 import { fetchFlagInfo, getCurrentTabInfo, getDomainsForRender, isSupportedDomain } from "./fetching.js";
+import { ensureTrackedFlagWithCache } from "../shared-tracking.js";
 import {
   normalizeText,
   sanitizeCollapsedDomainsByDomain,
@@ -1220,26 +1221,20 @@ async function handleTrackClick(domain) {
     return;
   }
 
-  const existingIds = getTrackedIdsForDomain(domain);
-  if (!existingIds.includes(id)) {
-    state.trackedFlagIdsByDomain[domain] = [...existingIds, id];
-    try {
-      await saveTrackedIds();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "unknown error";
-      setError(`Cannot save tracked ID: ${message}`);
-      return;
-    }
-  }
-
-  ui.trackInput.value = "";
-  await fetchAndRenderFlag(domain, id);
   try {
-    await saveFlagInfoCache();
+    const result = await ensureTrackedFlagWithCache(domain, id);
+    state.trackedFlagIdsByDomain = result.trackedIdsByDomain;
+    state.flagInfoByDomain = result.flagInfoByDomain;
+    ui.trackInput.value = "";
+    renderFlagBlock(result.fetchedInfo, {
+      onRemoveFlag: handleRemoveFlag,
+      onReorderFlags: handleReorderFlags
+    });
+    updateDomainFlagCount(domain);
     renderExperimentSetupSection();
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown error";
-    setError(`Cannot save flag cache: ${message}`);
+    setError(`Cannot track flag: ${message}`);
   }
 }
 
