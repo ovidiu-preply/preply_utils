@@ -38,12 +38,17 @@ function normalizeId(id) {
 }
 
 const EXPERIMENT_SETUP_DOMAIN = "crew.preply.com";
-const EXPERIMENT_SECTION_FIELDS = [
+const TARGET_ROLLOUT_MAX_LENGTH = 40;
+const EXPERIMENT_SECTION_FLAG_FIELDS = [
   { key: "rolloutFlagId", label: "Rollout flag" },
   { key: "studentAFlagId", label: "Student A flag" },
   { key: "studentBFlagId", label: "Student B flag" },
   { key: "aaFlagId", label: "Is AA experiment" }
 ];
+
+function sanitizeTargetRolloutValue(value) {
+  return normalizeText(value).slice(0, TARGET_ROLLOUT_MAX_LENGTH);
+}
 
 function sanitizePopupDimension(value, fallbackValue, maxValue) {
   const parsedValue = Number.parseInt(String(value), 10);
@@ -244,6 +249,7 @@ function createEmptyExperimentSection(sectionId) {
   return {
     id: sectionId,
     experimentFlagId: null,
+    targetRollout: "",
     rolloutFlagId: null,
     studentAFlagId: null,
     studentBFlagId: null,
@@ -300,6 +306,10 @@ function reconcileExperimentSetup() {
     const sectionId = normalizeId(section?.id) ?? normalizedSections.length + 1;
     const nextSection = createEmptyExperimentSection(sectionId);
     nextSection.isAaExperiment = Boolean(section?.isAaExperiment);
+    nextSection.targetRollout = sanitizeTargetRolloutValue(section?.targetRollout);
+    if (nextSection.targetRollout !== section?.targetRollout) {
+      hasChanged = true;
+    }
     const experimentFlagId = normalizeId(section?.experimentFlagId);
     const experimentOption = experimentFlagId !== null ? optionsById.get(experimentFlagId) : null;
     if (
@@ -314,7 +324,7 @@ function reconcileExperimentSetup() {
     } else if (experimentFlagId !== null) {
       hasChanged = true;
     }
-    for (const field of EXPERIMENT_SECTION_FIELDS) {
+    for (const field of EXPERIMENT_SECTION_FLAG_FIELDS) {
       const rawId = normalizeId(section?.[field.key]);
       if (field.key === "aaFlagId" && nextSection.isAaExperiment) {
         if (rawId !== null) {
@@ -360,7 +370,7 @@ function reconcileExperimentSetup() {
 function getUsedExperimentFieldIds(sections, ignoredSectionId, ignoredFieldKey) {
   const usedIds = new Set();
   for (const section of sections) {
-    for (const field of EXPERIMENT_SECTION_FIELDS) {
+    for (const field of EXPERIMENT_SECTION_FLAG_FIELDS) {
       if (section.id === ignoredSectionId && field.key === ignoredFieldKey) {
         continue;
       }
@@ -629,6 +639,25 @@ async function handleToggleSectionAaExperiment(sectionId, isAaExperiment) {
   }
 }
 
+async function handleUpdateSectionTargetRollout(sectionId, targetRollout) {
+  const sections = getExperimentSectionsForDomain(EXPERIMENT_SETUP_DOMAIN);
+  const section = sections.find((currentSection) => currentSection.id === sectionId);
+  if (!section) {
+    return;
+  }
+  const nextTargetRollout = sanitizeTargetRolloutValue(targetRollout);
+  if (nextTargetRollout === section.targetRollout) {
+    return;
+  }
+  section.targetRollout = nextTargetRollout;
+  try {
+    await saveExperimentSetup();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    setError(`Cannot save experiment setup: ${message}`);
+  }
+}
+
 async function handleAddExperimentSection(rawExperimentFlagId) {
   const experimentFlagId = normalizeId(Number.parseInt(String(rawExperimentFlagId), 10));
   if (experimentFlagId === null) {
@@ -733,7 +762,33 @@ function renderExperimentSetupSection() {
       item.append(sectionExperimentMeta);
     }
 
-    for (const field of EXPERIMENT_SECTION_FIELDS) {
+    const targetRolloutRow = document.createElement("div");
+    targetRolloutRow.className = "experiment-field-row";
+    const targetRolloutLabel = document.createElement("label");
+    targetRolloutLabel.className = "experiment-field-label";
+    targetRolloutLabel.textContent = "Target rollout";
+    const targetRolloutInput = document.createElement("input");
+    targetRolloutInput.className = "experiment-field-text-input";
+    targetRolloutInput.type = "text";
+    targetRolloutInput.placeholder = "e.g. 50%";
+    targetRolloutInput.maxLength = TARGET_ROLLOUT_MAX_LENGTH;
+    targetRolloutInput.value = sanitizeTargetRolloutValue(section.targetRollout);
+    targetRolloutInput.addEventListener("input", () => {
+      void handleUpdateSectionTargetRollout(section.id, targetRolloutInput.value);
+    });
+    targetRolloutInput.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") {
+        return;
+      }
+      event.preventDefault();
+      targetRolloutInput.blur();
+    });
+    targetRolloutLabel.htmlFor = `target-rollout-${section.id}`;
+    targetRolloutInput.id = `target-rollout-${section.id}`;
+    targetRolloutRow.append(targetRolloutLabel, targetRolloutInput);
+    item.append(targetRolloutRow);
+
+    for (const field of EXPERIMENT_SECTION_FLAG_FIELDS) {
       const row = document.createElement("div");
       row.className = "experiment-field-row";
 

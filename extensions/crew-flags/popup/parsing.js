@@ -67,10 +67,12 @@ export function sanitizeExperimentSetupByDomain(rawMap) {
     const section = rawSection && typeof rawSection === "object" ? rawSection : {};
     const parsedSectionId = normalizeId(Number.parseInt(String(section.id), 10)) ?? fallbackId;
     const normalizeFlagId = (value) => normalizeId(Number.parseInt(String(value), 10));
+    const normalizeTargetRollout = (value) => normalizeText(value).slice(0, 40);
     const legacyExperimentId = legacyId !== null && (rawSection === legacyId || typeof rawSection === "number");
     return {
       id: parsedSectionId,
       experimentFlagId: normalizeFlagId(section.experimentFlagId) ?? (legacyExperimentId ? legacyId : null),
+      targetRollout: normalizeTargetRollout(section.targetRollout),
       rolloutFlagId: normalizeFlagId(section.rolloutFlagId),
       studentAFlagId: normalizeFlagId(section.studentAFlagId),
       studentBFlagId: normalizeFlagId(section.studentBFlagId),
