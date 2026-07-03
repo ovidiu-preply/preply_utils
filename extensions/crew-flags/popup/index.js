@@ -433,6 +433,27 @@ function formatExperimentInlineMetric(rawValue) {
   return displayValue || "-";
 }
 
+function parsePercentNumber(rawValue) {
+  const normalizedValue = normalizeText(rawValue).replace(/,/gu, ".");
+  if (!normalizedValue) {
+    return null;
+  }
+  const match = normalizedValue.match(/^(-?\d+(?:\.\d+)?)\s*%?$/u);
+  if (!match) {
+    return null;
+  }
+  const parsed = Number.parseFloat(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function arePercentValuesEqual(rawValue, expectedValue) {
+  const actualValue = parsePercentNumber(rawValue);
+  if (actualValue === null || typeof expectedValue !== "number" || !Number.isFinite(expectedValue)) {
+    return false;
+  }
+  return Math.abs(actualValue - expectedValue) < 0.000001;
+}
+
 function getExperimentFlagMetrics(flagId) {
   const domainFlagInfo = state.flagInfoByDomain[EXPERIMENT_SETUP_DOMAIN];
   if (!domainFlagInfo || typeof domainFlagInfo !== "object") {
@@ -442,42 +463,121 @@ function getExperimentFlagMetrics(flagId) {
   if (!info || info.status !== "ok") {
     return null;
   }
+  const everyoneField = sanitizeFieldValue(info.everyone);
   return {
-    everyone: formatExperimentInlineMetric(info.everyone),
+    everyone: formatExperimentInlineMetric(everyoneField),
+    everyoneColor: normalizeText(everyoneField.colorValue).toLowerCase(),
     percent: formatExperimentInlineMetric(info.percent),
     audiencePercent: formatExperimentInlineMetric(info.audiencePercent)
   };
 }
 
-function createExperimentFlagInlineMeta(flagId) {
+function getExperimentFlagValidationState(section, fieldKey, flagId) {
+  const metrics = getExperimentFlagMetrics(flagId);
+  const normalizedEveryoneDisplay = normalizeText(metrics?.everyone).toLowerCase();
+  const normalizedEveryoneColor = normalizeText(metrics?.everyoneColor).toLowerCase();
+  const isBooleanLikeEveryoneValue =
+    /^(true|false)\b/u.test(normalizedEveryoneDisplay) ||
+    normalizedEveryoneColor === "true" ||
+    normalizedEveryoneColor === "false";
+  const isEveryoneValid = !isBooleanLikeEveryoneValue;
+  const isAudiencePercentValid = arePercentValuesEqual(metrics?.audiencePercent, 100);
+
+  if (fieldKey === "rolloutFlagId") {
+    const targetRolloutPercent = parsePercentNumber(section.targetRollout);
+    const isPercentValid = arePercentValuesEqual(metrics?.percent, targetRolloutPercent);
+    return {
+      isValidated: true,
+      hasValidationError: !isEveryoneValid || !isAudiencePercentValid || !isPercentValid,
+      metricStates: {
+        everyone: isEveryoneValid,
+        percent: isPercentValid,
+        audiencePercent: isAudiencePercentValid
+      }
+    };
+  }
+
+  if (
+    fieldKey === "experimentFlagId" ||
+    fieldKey === "studentAFlagId" ||
+    fieldKey === "studentBFlagId"
+  ) {
+    const isPercentValid = arePercentValuesEqual(metrics?.percent, 50);
+    return {
+      isValidated: true,
+      hasValidationError: !isEveryoneValid || !isAudiencePercentValid || !isPercentValid,
+      metricStates: {
+        everyone: isEveryoneValid,
+        percent: isPercentValid,
+        audiencePercent: isAudiencePercentValid
+      }
+    };
+  }
+
+  return {
+    hasValidationError: false,
+    isValidated: false,
+    metricStates: {
+      everyone: null,
+      percent: null,
+      audiencePercent: null
+    }
+  };
+}
+
+function createExperimentFlagInlineMeta(flagId, validationState) {
   const metrics = getExperimentFlagMetrics(flagId);
   const container = document.createElement("div");
   container.className = "experiment-flag-inline-meta";
-  const values = metrics
-    ? [metrics.everyone, metrics.percent, metrics.audiencePercent]
-    : ["-", "-", "-"];
-  for (const value of values) {
+  const badgeValues = metrics
+    ? [
+        { key: "everyone", value: metrics.everyone },
+        { key: "percent", value: metrics.percent },
+        { key: "audiencePercent", value: metrics.audiencePercent }
+      ]
+    : [
+        { key: "everyone", value: "-" },
+        { key: "percent", value: "-" },
+        { key: "audiencePercent", value: "-" }
+      ];
+  for (const badgeValue of badgeValues) {
     const item = document.createElement("span");
     item.className = "experiment-flag-inline-meta-item";
-    item.textContent = value;
+    const metricIsValid = validationState.metricStates?.[badgeValue.key];
+    const shouldShowMetricState = validationState.isValidated && typeof metricIsValid === "boolean";
+    item.classList.toggle(
+      "experiment-flag-inline-meta-item-error",
+      shouldShowMetricState && !metricIsValid
+    );
+    item.classList.toggle(
+      "experiment-flag-inline-meta-item-valid",
+      shouldShowMetricState && metricIsValid
+    );
+    item.textContent = badgeValue.value;
     container.append(item);
   }
   return container;
 }
 
-function createExperimentFlagDetails(selectedFlag) {
+function createExperimentFlagDetails(
+  selectedFlag,
+  validationState = { hasValidationError: false, isValidated: false, metricStates: null }
+) {
   const details = document.createElement("div");
   details.className = "experiment-field-selected-details";
   const badge = document.createElement("span");
   badge.className = "value-badge";
+  badge.classList.toggle("value-badge-false", validationState.isValidated && validationState.hasValidationError);
+  badge.classList.toggle("value-badge-true", validationState.isValidated && !validationState.hasValidationError);
   badge.textContent = `${selectedFlag.name} (ID ${selectedFlag.id})`;
-  details.append(badge, createExperimentFlagInlineMeta(selectedFlag.id));
+  details.append(badge, createExperimentFlagInlineMeta(selectedFlag.id, validationState));
   return details;
 }
 
-function appendSelectedExperimentFlag(fieldValue, selectedFlag, sectionId, fieldKey) {
+function appendSelectedExperimentFlag(fieldValue, section, selectedFlag, sectionId, fieldKey) {
   fieldValue.className = "experiment-field-selected";
-  const details = createExperimentFlagDetails(selectedFlag);
+  const validationState = getExperimentFlagValidationState(section, fieldKey, selectedFlag.id);
+  const details = createExperimentFlagDetails(selectedFlag, validationState);
   const removeButton = createExperimentDeleteIconButton();
   removeButton.addEventListener("click", () => {
     void handleClearExperimentFlag(sectionId, fieldKey);
@@ -639,7 +739,11 @@ async function handleToggleSectionAaExperiment(sectionId, isAaExperiment) {
   }
 }
 
-async function handleUpdateSectionTargetRollout(sectionId, targetRollout) {
+async function handleUpdateSectionTargetRollout(
+  sectionId,
+  targetRollout,
+  { forceValidationRender = false } = {}
+) {
   const sections = getExperimentSectionsForDomain(EXPERIMENT_SETUP_DOMAIN);
   const section = sections.find((currentSection) => currentSection.id === sectionId);
   if (!section) {
@@ -647,11 +751,17 @@ async function handleUpdateSectionTargetRollout(sectionId, targetRollout) {
   }
   const nextTargetRollout = sanitizeTargetRolloutValue(targetRollout);
   if (nextTargetRollout === section.targetRollout) {
+    if (forceValidationRender) {
+      renderExperimentSetupSection();
+    }
     return;
   }
   section.targetRollout = nextTargetRollout;
   try {
     await saveExperimentSetup();
+    if (forceValidationRender) {
+      renderExperimentSetupSection();
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown error";
     setError(`Cannot save experiment setup: ${message}`);
@@ -706,6 +816,9 @@ async function handleRemoveExperimentSection(sectionId) {
 }
 
 function renderExperimentSetupSection() {
+  const popupMainElement = document.querySelector("main");
+  const previousScrollTop = popupMainElement instanceof HTMLElement ? popupMainElement.scrollTop : null;
+
   const addSectionButton = document.getElementById("experiment-setup-add-section-button");
   const createSelect = document.getElementById("experiment-setup-create-select");
   const listElement = document.getElementById("experiment-setup-list");
@@ -757,7 +870,15 @@ function renderExperimentSetupSection() {
     title.textContent = sectionName;
     item.append(title);
     if (sectionExperimentFlag) {
-      const sectionExperimentMeta = createExperimentFlagDetails(sectionExperimentFlag);
+      const sectionExperimentValidation = getExperimentFlagValidationState(
+        section,
+        "experimentFlagId",
+        sectionExperimentFlag.id
+      );
+      const sectionExperimentMeta = createExperimentFlagDetails(
+        sectionExperimentFlag,
+        sectionExperimentValidation
+      );
       sectionExperimentMeta.classList.add("experiment-section-main-flag");
       item.append(sectionExperimentMeta);
     }
@@ -775,6 +896,11 @@ function renderExperimentSetupSection() {
     targetRolloutInput.value = sanitizeTargetRolloutValue(section.targetRollout);
     targetRolloutInput.addEventListener("input", () => {
       void handleUpdateSectionTargetRollout(section.id, targetRolloutInput.value);
+    });
+    targetRolloutInput.addEventListener("change", () => {
+      void handleUpdateSectionTargetRollout(section.id, targetRolloutInput.value, {
+        forceValidationRender: true
+      });
     });
     targetRolloutInput.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") {
@@ -804,7 +930,7 @@ function renderExperimentSetupSection() {
 
       if (isAaField && hasSelectedValue) {
         label.textContent = "AA experiment";
-        appendSelectedExperimentFlag(fieldValue, selectedFlag, section.id, field.key);
+        appendSelectedExperimentFlag(fieldValue, section, selectedFlag, section.id, field.key);
       } else if (isAaField) {
         label.classList.add("experiment-field-label-with-checkbox");
         const labelText = document.createElement("span");
@@ -851,7 +977,7 @@ function renderExperimentSetupSection() {
         label.textContent = field.label;
 
         if (hasSelectedValue) {
-          appendSelectedExperimentFlag(fieldValue, selectedFlag, section.id, field.key);
+          appendSelectedExperimentFlag(fieldValue, section, selectedFlag, section.id, field.key);
         } else {
           const select = document.createElement("select");
           select.className = "experiment-field-select";
@@ -895,6 +1021,10 @@ function renderExperimentSetupSection() {
   }
 
   emptyElement.toggleAttribute("hidden", listElement.childElementCount > 0);
+
+  if (popupMainElement instanceof HTMLElement && typeof previousScrollTop === "number") {
+    popupMainElement.scrollTop = previousScrollTop;
+  }
 }
 
 function setupExperimentSetupUi() {
