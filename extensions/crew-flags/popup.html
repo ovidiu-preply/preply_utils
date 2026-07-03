@@ -67,6 +67,169 @@
         margin-bottom: 10px;
       }
 
+      .tabs-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 10px;
+        border-bottom: 1px solid #e5e7eb;
+      }
+
+      .tab-button {
+        border: none;
+        background: transparent;
+        border-radius: 6px 6px 0 0;
+        color: #4b5563;
+        font-size: 12px;
+        font-weight: 600;
+        padding: 7px 10px;
+        cursor: pointer;
+      }
+
+      .tab-button:hover {
+        background: #f3f4f6;
+      }
+
+      .tab-button[aria-selected="true"] {
+        background: #eef2ff;
+        color: #3730a3;
+      }
+
+      .tab-button:focus-visible {
+        outline: 2px solid #6366f1;
+        outline-offset: 1px;
+      }
+
+      .tab-panel {
+        margin-top: 0;
+      }
+
+      .experiment-setup-section {
+        border: 1px solid #e5e7eb;
+        background: #f9fafb;
+        border-radius: 8px;
+        padding: 10px;
+      }
+
+      .experiment-setup-section + .experiment-setup-section {
+        margin-top: 8px;
+      }
+
+      .experiment-setup-title {
+        margin: 0 0 8px;
+        font-size: 12px;
+        color: #374151;
+      }
+
+      .experiment-setup-select-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .experiment-setup-select {
+        flex: 1;
+        box-sizing: border-box;
+        font-size: 12px;
+        padding: 5px 6px;
+      }
+
+      .experiment-setup-add-button {
+        height: 28px;
+        border: 1px solid #cbd5e1;
+        background: #fff;
+        border-radius: 6px;
+        cursor: pointer;
+        padding: 0 10px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .experiment-setup-add-button:hover {
+        background: #eef2ff;
+        border-color: #c7d2fe;
+      }
+
+      .experiment-setup-empty {
+        margin: 0;
+        font-size: 12px;
+        color: #6b7280;
+      }
+
+      .experiment-setup-list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .experiment-setup-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .experiment-setup-item + .experiment-setup-item {
+        margin-top: 6px;
+      }
+
+      .experiment-setup-item-label {
+        min-width: 0;
+        flex: 1;
+        font-size: 12px;
+        color: #1f2937;
+        word-break: break-word;
+      }
+
+      .experiment-setup-item-actions {
+        margin-left: auto;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 4px;
+      }
+
+      .experiment-setup-remove-button {
+        border: 1px solid #fecaca;
+        color: #991b1b;
+        background: #fff;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 2px 8px;
+      }
+
+      .experiment-setup-remove-button:hover {
+        background: #fef2f2;
+      }
+
+      .experiment-setup-confirm-button,
+      .experiment-setup-cancel-button {
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        background: #fff;
+        color: #1f2937;
+        font-size: 11px;
+        font-weight: 600;
+        min-width: 62px;
+        padding: 2px 8px;
+        cursor: pointer;
+      }
+
+      .experiment-setup-cancel-button:hover {
+        background: #f3f4f6;
+      }
+
+      .experiment-setup-confirm-button {
+        border-color: #fecaca;
+        color: #991b1b;
+      }
+
+      .experiment-setup-confirm-button:hover {
+        background: #fef2f2;
+      }
+
       .settings-grid {
         display: grid;
         grid-template-columns: 1fr 1fr auto;
@@ -495,8 +658,57 @@
           <button id="save-settings-button" class="settings-save-button" type="button">Save</button>
         </div>
       </section>
-      <ul id="fields"></ul>
-      <div id="error"></div>
+      <div class="tabs-row" role="tablist" aria-label="Popup sections">
+        <button
+          id="tab-flags"
+          class="tab-button"
+          type="button"
+          role="tab"
+          aria-controls="panel-flags"
+          aria-selected="true"
+          data-tab-target="flags"
+        >
+          Flags
+        </button>
+        <button
+          id="tab-experiment-setup"
+          class="tab-button"
+          type="button"
+          role="tab"
+          aria-controls="panel-experiment-setup"
+          aria-selected="false"
+          data-tab-target="experiment-setup"
+        >
+          Experiment setup
+        </button>
+      </div>
+      <section id="panel-flags" class="tab-panel" role="tabpanel" aria-labelledby="tab-flags" data-tab-panel="flags">
+        <ul id="fields"></ul>
+        <div id="error"></div>
+      </section>
+      <section
+        id="panel-experiment-setup"
+        class="tab-panel"
+        role="tabpanel"
+        aria-labelledby="tab-experiment-setup"
+        data-tab-panel="experiment-setup"
+        hidden
+      >
+        <section class="experiment-setup-section">
+          <h2 class="experiment-setup-title">Pick experiment flag from crew.preply.com</h2>
+          <div class="experiment-setup-select-row">
+            <select id="experiment-flag-select" class="experiment-setup-select"></select>
+            <button id="experiment-setup-add-button" class="experiment-setup-add-button" type="button">
+              Add
+            </button>
+          </div>
+        </section>
+        <section class="experiment-setup-section">
+          <h2 class="experiment-setup-title">Experiment setup selection</h2>
+          <p id="experiment-setup-empty" class="experiment-setup-empty">No experiment flags selected yet.</p>
+          <ul id="experiment-setup-list" class="experiment-setup-list"></ul>
+        </section>
+      </section>
     </main>
     <script type="module" src="popup/index.js"></script>
   </body>

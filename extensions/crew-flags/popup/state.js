@@ -3,6 +3,7 @@ export const state = {
   trackedFlagIdsByDomain: {},
   collapsedDomainsByDomain: {},
   flagInfoByDomain: {},
+  experimentSetupByDomain: {},
   highlightedDomain: "",
   highlightedFlagKey: "",
   popupSettings: {

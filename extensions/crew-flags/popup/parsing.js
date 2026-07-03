@@ -56,6 +56,22 @@ export function sanitizeCollapsedDomainsByDomain(rawMap) {
   return sanitized;
 }
 
+export function sanitizeExperimentSetupByDomain(rawMap) {
+  const sanitized = {};
+  if (!rawMap || typeof rawMap !== "object") {
+    return sanitized;
+  }
+
+  for (const [domain, ids] of Object.entries(rawMap)) {
+    if (typeof domain !== "string" || domain.trim() === "") {
+      continue;
+    }
+    sanitized[domain] = sanitizeIds(ids);
+  }
+
+  return sanitized;
+}
+
 export function createFieldValue(displayValue, colorValue) {
   return {
     displayValue: typeof displayValue === "string" ? displayValue : "",

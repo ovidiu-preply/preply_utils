@@ -2,6 +2,7 @@ import {
   COLLAPSED_DOMAINS_STORAGE_KEY,
   DEFAULT_POPUP_HEIGHT,
   DEFAULT_POPUP_WIDTH,
+  EXPERIMENT_SETUP_STORAGE_KEY,
   FLAG_CACHE_STORAGE_KEY,
   MAX_POPUP_HEIGHT,
   MAX_POPUP_WIDTH,
@@ -12,6 +13,7 @@ import {
 import { fetchFlagInfo, getCurrentTabInfo, getDomainsForRender, isSupportedDomain } from "./fetching.js";
 import {
   sanitizeCollapsedDomainsByDomain,
+  sanitizeExperimentSetupByDomain,
   sanitizeFlagInfo,
   sanitizeFlagInfoByDomain,
   sanitizeTrackedIdsByDomain
@@ -32,6 +34,9 @@ import {
 function normalizeId(id) {
   return Number.isInteger(id) && id > 0 ? id : null;
 }
+
+const EXPERIMENT_SETUP_DOMAIN = "crew.preply.com";
+let pendingExperimentRemoveId = null;
 
 function sanitizePopupDimension(value, fallbackValue, maxValue) {
   const parsedValue = Number.parseInt(String(value), 10);
@@ -150,6 +155,62 @@ function setupPopupSettingsUi() {
   }
 }
 
+function setupTabsUi() {
+  const tabButtons = Array.from(document.querySelectorAll("[data-tab-target]")).filter(
+    (element) => element instanceof HTMLButtonElement
+  );
+  const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]")).filter(
+    (element) => element instanceof HTMLElement
+  );
+
+  if (tabButtons.length === 0 || tabPanels.length === 0) {
+    return;
+  }
+
+  const activateTab = (targetTab) => {
+    for (const button of tabButtons) {
+      const isActive = button.dataset.tabTarget === targetTab;
+      button.setAttribute("aria-selected", isActive ? "true" : "false");
+      if (isActive) {
+        button.focus();
+      }
+    }
+
+    for (const panel of tabPanels) {
+      const isActive = panel.dataset.tabPanel === targetTab;
+      panel.toggleAttribute("hidden", !isActive);
+    }
+  };
+
+  for (const button of tabButtons) {
+    button.addEventListener("click", () => {
+      const targetTab = button.dataset.tabTarget || "";
+      if (!targetTab) {
+        return;
+      }
+      activateTab(targetTab);
+    });
+
+    button.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") {
+        return;
+      }
+      event.preventDefault();
+      const currentIndex = tabButtons.indexOf(button);
+      if (currentIndex < 0) {
+        return;
+      }
+      const direction = event.key === "ArrowRight" ? 1 : -1;
+      const nextIndex = (currentIndex + direction + tabButtons.length) % tabButtons.length;
+      const nextButton = tabButtons[nextIndex];
+      const nextTab = nextButton.dataset.tabTarget || "";
+      if (nextTab) {
+        activateTab(nextTab);
+      }
+    });
+  }
+}
+
 async function saveTrackedIds() {
   await setInStorage({ [TRACKED_IDS_STORAGE_KEY]: state.trackedFlagIdsByDomain });
 }
@@ -162,10 +223,228 @@ async function saveCollapsedDomains() {
   await setInStorage({ [COLLAPSED_DOMAINS_STORAGE_KEY]: state.collapsedDomainsByDomain });
 }
 
+async function saveExperimentSetup() {
+  await setInStorage({ [EXPERIMENT_SETUP_STORAGE_KEY]: state.experimentSetupByDomain });
+}
+
 function getTrackedIdsForDomain(domain) {
   return Array.isArray(state.trackedFlagIdsByDomain[domain])
     ? state.trackedFlagIdsByDomain[domain]
     : [];
+}
+
+function getExperimentSetupIdsForDomain(domain) {
+  return Array.isArray(state.experimentSetupByDomain[domain]) ? state.experimentSetupByDomain[domain] : [];
+}
+
+function getExperimentFlagOptions() {
+  const trackedIds = getTrackedIdsForDomain(EXPERIMENT_SETUP_DOMAIN);
+  const domainFlagInfo = state.flagInfoByDomain[EXPERIMENT_SETUP_DOMAIN];
+  if (!domainFlagInfo || typeof domainFlagInfo !== "object" || trackedIds.length === 0) {
+    return [];
+  }
+
+  const options = [];
+  for (const id of trackedIds) {
+    const info = sanitizeFlagInfo(domainFlagInfo[id]);
+    if (!info || info.status !== "ok" || typeof info.flagName !== "string") {
+      continue;
+    }
+    if (!info.flagName.startsWith("exp_")) {
+      continue;
+    }
+    options.push({
+      id,
+      name: info.flagName
+    });
+  }
+
+  options.sort((left, right) => {
+    const byName = left.name.localeCompare(right.name);
+    if (byName !== 0) {
+      return byName;
+    }
+    return left.id - right.id;
+  });
+
+  return options;
+}
+
+function reconcileExperimentSetup() {
+  const options = getExperimentFlagOptions();
+  const optionIds = new Set(options.map((option) => option.id));
+  const selectedIds = getExperimentSetupIdsForDomain(EXPERIMENT_SETUP_DOMAIN);
+  const filteredIds = selectedIds.filter((id) => optionIds.has(id));
+  const hasChanged = filteredIds.length !== selectedIds.length;
+  if (hasChanged) {
+    state.experimentSetupByDomain[EXPERIMENT_SETUP_DOMAIN] = filteredIds;
+    void saveExperimentSetup();
+  }
+  return options;
+}
+
+function renderExperimentSetupSection() {
+  const selectElement = document.getElementById("experiment-flag-select");
+  const addButton = document.getElementById("experiment-setup-add-button");
+  const listElement = document.getElementById("experiment-setup-list");
+  const emptyElement = document.getElementById("experiment-setup-empty");
+  if (
+    !(selectElement instanceof HTMLSelectElement) ||
+    !(addButton instanceof HTMLButtonElement) ||
+    !(listElement instanceof HTMLElement) ||
+    !(emptyElement instanceof HTMLElement)
+  ) {
+    return;
+  }
+
+  const options = reconcileExperimentSetup();
+  const selectedIds = getExperimentSetupIdsForDomain(EXPERIMENT_SETUP_DOMAIN);
+  const selectedIdSet = new Set(selectedIds);
+
+  selectElement.replaceChildren();
+  const selectableOptions = options.filter((option) => !selectedIdSet.has(option.id));
+  if (selectableOptions.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No tracked exp_ flags available";
+    selectElement.append(option);
+    selectElement.disabled = true;
+    addButton.disabled = true;
+  } else {
+    for (const optionInfo of selectableOptions) {
+      const option = document.createElement("option");
+      option.value = String(optionInfo.id);
+      option.textContent = `${optionInfo.name} (ID ${optionInfo.id})`;
+      selectElement.append(option);
+    }
+    selectElement.disabled = false;
+    addButton.disabled = false;
+  }
+
+  listElement.replaceChildren();
+  const selectedById = new Map(options.map((option) => [option.id, option]));
+  for (const id of selectedIds) {
+    const option = selectedById.get(id);
+    if (!option) {
+      continue;
+    }
+
+    const item = document.createElement("li");
+    item.className = "experiment-setup-item";
+
+    const itemLabel = document.createElement("div");
+    itemLabel.className = "experiment-setup-item-label";
+    itemLabel.textContent = `${option.name} (ID ${id})`;
+
+    const actions = document.createElement("div");
+    actions.className = "experiment-setup-item-actions";
+    if (pendingExperimentRemoveId === id) {
+      const confirmButton = document.createElement("button");
+      confirmButton.className = "experiment-setup-confirm-button";
+      confirmButton.type = "button";
+      confirmButton.textContent = "Confirm";
+      confirmButton.addEventListener("click", () => {
+        void handleRemoveExperimentFlag(id);
+      });
+
+      const cancelButton = document.createElement("button");
+      cancelButton.className = "experiment-setup-cancel-button";
+      cancelButton.type = "button";
+      cancelButton.textContent = "Cancel";
+      cancelButton.addEventListener("click", () => {
+        pendingExperimentRemoveId = null;
+        renderExperimentSetupSection();
+      });
+
+      actions.append(confirmButton, cancelButton);
+    } else {
+      const removeButton = document.createElement("button");
+      removeButton.className = "experiment-setup-remove-button";
+      removeButton.type = "button";
+      removeButton.textContent = "Remove";
+      removeButton.addEventListener("click", () => {
+        pendingExperimentRemoveId = id;
+        renderExperimentSetupSection();
+      });
+      actions.append(removeButton);
+    }
+
+    item.append(itemLabel, actions);
+    listElement.append(item);
+  }
+
+  emptyElement.toggleAttribute("hidden", listElement.childElementCount > 0);
+}
+
+async function handleAddExperimentFlag() {
+  setError("");
+  const selectElement = document.getElementById("experiment-flag-select");
+  if (!(selectElement instanceof HTMLSelectElement)) {
+    return;
+  }
+  const parsedId = Number.parseInt(selectElement.value, 10);
+  const selectedId = normalizeId(parsedId);
+  if (selectedId === null) {
+    return;
+  }
+
+  const selectedIds = getExperimentSetupIdsForDomain(EXPERIMENT_SETUP_DOMAIN);
+  if (selectedIds.includes(selectedId)) {
+    return;
+  }
+
+  const availableIdSet = new Set(getExperimentFlagOptions().map((option) => option.id));
+  if (!availableIdSet.has(selectedId)) {
+    setError("Flag not available for experiment setup.");
+    return;
+  }
+
+  state.experimentSetupByDomain[EXPERIMENT_SETUP_DOMAIN] = [...selectedIds, selectedId];
+  try {
+    await saveExperimentSetup();
+    renderExperimentSetupSection();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    setError(`Cannot save experiment setup: ${message}`);
+  }
+}
+
+async function handleRemoveExperimentFlag(id) {
+  const selectedIds = getExperimentSetupIdsForDomain(EXPERIMENT_SETUP_DOMAIN);
+  if (!selectedIds.includes(id)) {
+    return;
+  }
+
+  pendingExperimentRemoveId = null;
+  state.experimentSetupByDomain[EXPERIMENT_SETUP_DOMAIN] = selectedIds.filter(
+    (selectedId) => selectedId !== id
+  );
+  try {
+    await saveExperimentSetup();
+    renderExperimentSetupSection();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    setError(`Cannot save experiment setup: ${message}`);
+  }
+}
+
+function setupExperimentSetupUi() {
+  const addButton = document.getElementById("experiment-setup-add-button");
+  const selectElement = document.getElementById("experiment-flag-select");
+  if (!(addButton instanceof HTMLButtonElement) || !(selectElement instanceof HTMLSelectElement)) {
+    return;
+  }
+
+  addButton.addEventListener("click", () => {
+    void handleAddExperimentFlag();
+  });
+  selectElement.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    void handleAddExperimentFlag();
+  });
 }
 
 async function removeTrackedFlag(domain, id) {
@@ -180,6 +459,7 @@ async function removeTrackedFlag(domain, id) {
   }
   try {
     await Promise.all([saveTrackedIds(), saveFlagInfoCache()]);
+    renderExperimentSetupSection();
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown error";
@@ -196,8 +476,15 @@ async function removeTrackedDomain(domain) {
   delete state.trackedFlagIdsByDomain[domain];
   delete state.flagInfoByDomain[domain];
   delete state.collapsedDomainsByDomain[domain];
+  delete state.experimentSetupByDomain[domain];
   try {
-    await Promise.all([saveTrackedIds(), saveFlagInfoCache(), saveCollapsedDomains()]);
+    await Promise.all([
+      saveTrackedIds(),
+      saveFlagInfoCache(),
+      saveCollapsedDomains(),
+      saveExperimentSetup()
+    ]);
+    renderExperimentSetupSection();
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown error";
@@ -274,6 +561,7 @@ async function refreshDomainFlags(domain) {
   try {
     await Promise.all(ids.map((id) => fetchAndRenderFlag(domain, id)));
     await saveFlagInfoCache();
+    renderExperimentSetupSection();
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown error";
     setError(`Cannot refresh ${domain}: ${message}`);
@@ -313,6 +601,7 @@ async function handleTrackClick(domain) {
   await fetchAndRenderFlag(domain, id);
   try {
     await saveFlagInfoCache();
+    renderExperimentSetupSection();
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown error";
     setError(`Cannot save flag cache: ${message}`);
@@ -357,6 +646,7 @@ async function handleReorderFlags(domain, orderedIds) {
   state.trackedFlagIdsByDomain[domain] = orderedIds;
   try {
     await saveTrackedIds();
+    renderExperimentSetupSection();
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown error";
     setError(`Cannot reorder tracked IDs: ${message}`);
@@ -397,6 +687,15 @@ async function loadFlagInfo() {
     state.flagInfoByDomain = sanitizeFlagInfoByDomain(null);
     const message = error instanceof Error ? error.message : "unknown error";
     setError(`Cannot read flag cache: ${message}`);
+  }
+
+  try {
+    const fromStorage = await getFromStorage(EXPERIMENT_SETUP_STORAGE_KEY);
+    state.experimentSetupByDomain = sanitizeExperimentSetupByDomain(fromStorage);
+  } catch (error) {
+    state.experimentSetupByDomain = sanitizeExperimentSetupByDomain(null);
+    const message = error instanceof Error ? error.message : "unknown error";
+    setError(`Cannot read experiment setup: ${message}`);
   }
 
   try {
@@ -444,10 +743,14 @@ async function loadFlagInfo() {
       ui.trackInput.value = String(prefillFlagId);
     }
   }
+
+  renderExperimentSetupSection();
 }
 
 async function initializePopup() {
+  setupTabsUi();
   setupPopupSettingsUi();
+  setupExperimentSetupUi();
   await loadPopupSettings();
   await loadFlagInfo();
 }

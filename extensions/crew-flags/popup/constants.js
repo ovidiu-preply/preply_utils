@@ -2,6 +2,7 @@ export const TRACKED_IDS_STORAGE_KEY = "trackedFlagIdsByDomain";
 export const FLAG_CACHE_STORAGE_KEY = "flagInfoByDomain";
 export const COLLAPSED_DOMAINS_STORAGE_KEY = "collapsedDomainsByDomain";
 export const POPUP_SETTINGS_STORAGE_KEY = "popupSettings";
+export const EXPERIMENT_SETUP_STORAGE_KEY = "experimentSetupByDomain";
 export const STALE_FETCH_THRESHOLD_MS = 2 * 60 * 1000;
 export const DEFAULT_POPUP_WIDTH = 560;
 export const DEFAULT_POPUP_HEIGHT = 520;
