@@ -454,6 +454,10 @@ function arePercentValuesEqual(rawValue, expectedValue) {
   return Math.abs(actualValue - expectedValue) < 0.000001;
 }
 
+function isYesOrTrueValue(rawValue) {
+  return /^(yes|true)\b/u.test(normalizeText(rawValue).toLowerCase());
+}
+
 function getExperimentFlagMetrics(flagId) {
   const domainFlagInfo = state.flagInfoByDomain[EXPERIMENT_SETUP_DOMAIN];
   if (!domainFlagInfo || typeof domainFlagInfo !== "object") {
@@ -484,6 +488,19 @@ function getExperimentFlagValidationState(section, fieldKey, flagId) {
   const isAudiencePercentValid = arePercentValuesEqual(metrics?.audiencePercent, 100);
 
   if (fieldKey === "rolloutFlagId") {
+    if (Boolean(section.isAaExperiment)) {
+      const isEveryoneValidForAaRollout =
+        isYesOrTrueValue(normalizedEveryoneDisplay) || isYesOrTrueValue(normalizedEveryoneColor);
+      return {
+        isValidated: true,
+        hasValidationError: !isEveryoneValidForAaRollout,
+        metricStates: {
+          everyone: isEveryoneValidForAaRollout,
+          percent: null,
+          audiencePercent: null
+        }
+      };
+    }
     const targetRolloutPercent = parsePercentNumber(section.targetRollout);
     const isPercentValid = arePercentValuesEqual(metrics?.percent, targetRolloutPercent);
     return {
@@ -818,6 +835,15 @@ async function handleRemoveExperimentSection(sectionId) {
 function renderExperimentSetupSection() {
   const popupMainElement = document.querySelector("main");
   const previousScrollTop = popupMainElement instanceof HTMLElement ? popupMainElement.scrollTop : null;
+  const activeElement = document.activeElement;
+  const activeTargetRolloutInput =
+    activeElement instanceof HTMLInputElement && activeElement.id.startsWith("target-rollout-")
+      ? {
+          id: activeElement.id,
+          selectionStart: activeElement.selectionStart,
+          selectionEnd: activeElement.selectionEnd
+        }
+      : null;
 
   const addSectionButton = document.getElementById("experiment-setup-add-section-button");
   const createSelect = document.getElementById("experiment-setup-create-select");
@@ -883,36 +909,28 @@ function renderExperimentSetupSection() {
       item.append(sectionExperimentMeta);
     }
 
-    const targetRolloutRow = document.createElement("div");
-    targetRolloutRow.className = "experiment-field-row";
-    const targetRolloutLabel = document.createElement("label");
-    targetRolloutLabel.className = "experiment-field-label";
-    targetRolloutLabel.textContent = "Target rollout";
-    const targetRolloutInput = document.createElement("input");
-    targetRolloutInput.className = "experiment-field-text-input";
-    targetRolloutInput.type = "text";
-    targetRolloutInput.placeholder = "e.g. 50%";
-    targetRolloutInput.maxLength = TARGET_ROLLOUT_MAX_LENGTH;
-    targetRolloutInput.value = sanitizeTargetRolloutValue(section.targetRollout);
-    targetRolloutInput.addEventListener("input", () => {
-      void handleUpdateSectionTargetRollout(section.id, targetRolloutInput.value);
-    });
-    targetRolloutInput.addEventListener("change", () => {
-      void handleUpdateSectionTargetRollout(section.id, targetRolloutInput.value, {
-        forceValidationRender: true
+    if (!Boolean(section.isAaExperiment)) {
+      const targetRolloutRow = document.createElement("div");
+      targetRolloutRow.className = "experiment-field-row";
+      const targetRolloutLabel = document.createElement("label");
+      targetRolloutLabel.className = "experiment-field-label";
+      targetRolloutLabel.textContent = "Target rollout";
+      const targetRolloutInput = document.createElement("input");
+      targetRolloutInput.className = "experiment-field-text-input";
+      targetRolloutInput.type = "text";
+      targetRolloutInput.placeholder = "e.g. 50%";
+      targetRolloutInput.maxLength = TARGET_ROLLOUT_MAX_LENGTH;
+      targetRolloutInput.value = sanitizeTargetRolloutValue(section.targetRollout);
+      targetRolloutInput.addEventListener("input", () => {
+        void handleUpdateSectionTargetRollout(section.id, targetRolloutInput.value, {
+          forceValidationRender: true
+        });
       });
-    });
-    targetRolloutInput.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter") {
-        return;
-      }
-      event.preventDefault();
-      targetRolloutInput.blur();
-    });
-    targetRolloutLabel.htmlFor = `target-rollout-${section.id}`;
-    targetRolloutInput.id = `target-rollout-${section.id}`;
-    targetRolloutRow.append(targetRolloutLabel, targetRolloutInput);
-    item.append(targetRolloutRow);
+      targetRolloutLabel.htmlFor = `target-rollout-${section.id}`;
+      targetRolloutInput.id = `target-rollout-${section.id}`;
+      targetRolloutRow.append(targetRolloutLabel, targetRolloutInput);
+      item.append(targetRolloutRow);
+    }
 
     for (const field of EXPERIMENT_SECTION_FLAG_FIELDS) {
       const row = document.createElement("div");
@@ -1024,6 +1042,22 @@ function renderExperimentSetupSection() {
 
   if (popupMainElement instanceof HTMLElement && typeof previousScrollTop === "number") {
     popupMainElement.scrollTop = previousScrollTop;
+  }
+
+  if (activeTargetRolloutInput) {
+    const nextActiveInput = document.getElementById(activeTargetRolloutInput.id);
+    if (nextActiveInput instanceof HTMLInputElement) {
+      nextActiveInput.focus();
+      if (
+        typeof activeTargetRolloutInput.selectionStart === "number" &&
+        typeof activeTargetRolloutInput.selectionEnd === "number"
+      ) {
+        nextActiveInput.setSelectionRange(
+          activeTargetRolloutInput.selectionStart,
+          activeTargetRolloutInput.selectionEnd
+        );
+      }
+    }
   }
 }
 
