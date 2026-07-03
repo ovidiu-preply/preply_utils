@@ -40,7 +40,7 @@ const EXPERIMENT_SECTION_FIELDS = [
   { key: "rolloutFlagId", label: "Rollout flag" },
   { key: "studentAFlagId", label: "Student A flag" },
   { key: "studentBFlagId", label: "Student B flag" },
-  { key: "aaFlagId", label: "AA experiment" }
+  { key: "aaFlagId", label: "Is AA experiment" }
 ];
 
 function sanitizePopupDimension(value, fallbackValue, maxValue) {
@@ -245,7 +245,8 @@ function createEmptyExperimentSection(sectionId) {
     rolloutFlagId: null,
     studentAFlagId: null,
     studentBFlagId: null,
-    aaFlagId: null
+    aaFlagId: null,
+    isAaExperiment: false
   };
 }
 
@@ -296,6 +297,7 @@ function reconcileExperimentSetup() {
   for (const section of currentSections) {
     const sectionId = normalizeId(section?.id) ?? normalizedSections.length + 1;
     const nextSection = createEmptyExperimentSection(sectionId);
+    nextSection.isAaExperiment = Boolean(section?.isAaExperiment);
     const experimentFlagId = normalizeId(section?.experimentFlagId);
     const experimentOption = experimentFlagId !== null ? optionsById.get(experimentFlagId) : null;
     if (
@@ -312,6 +314,12 @@ function reconcileExperimentSetup() {
     }
     for (const field of EXPERIMENT_SECTION_FIELDS) {
       const rawId = normalizeId(section?.[field.key]);
+      if (field.key === "aaFlagId" && nextSection.isAaExperiment) {
+        if (rawId !== null) {
+          hasChanged = true;
+        }
+        continue;
+      }
       const option = rawId !== null ? optionsById.get(rawId) : null;
       const hasValidPrefix =
         option &&
@@ -477,7 +485,9 @@ function autoAssignExperimentSectionFlags(section, options, sections) {
   tryAssign("rolloutFlagId", expectedNames.rollout, "flag_");
   tryAssign("studentAFlagId", expectedNames.studentA, "flag_");
   tryAssign("studentBFlagId", expectedNames.studentB, "flag_");
-  tryAssign("aaFlagId", expectedNames.aa, "exp_");
+  if (!Boolean(section.isAaExperiment)) {
+    tryAssign("aaFlagId", expectedNames.aa, "exp_");
+  }
 }
 
 async function handleSelectExperimentFlag(sectionId, fieldKey, rawFlagId) {
@@ -532,6 +542,25 @@ async function handleClearExperimentFlag(sectionId, fieldKey) {
     return;
   }
   section[fieldKey] = null;
+  try {
+    await saveExperimentSetup();
+    renderExperimentSetupSection();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    setError(`Cannot save experiment setup: ${message}`);
+  }
+}
+
+async function handleToggleSectionAaExperiment(sectionId, isAaExperiment) {
+  const sections = getExperimentSectionsForDomain(EXPERIMENT_SETUP_DOMAIN);
+  const section = sections.find((currentSection) => currentSection.id === sectionId);
+  if (!section) {
+    return;
+  }
+  section.isAaExperiment = Boolean(isAaExperiment);
+  if (section.isAaExperiment) {
+    section.aaFlagId = null;
+  }
   try {
     await saveExperimentSetup();
     renderExperimentSetupSection();
@@ -643,13 +672,16 @@ function renderExperimentSetupSection() {
 
       const label = document.createElement("div");
       label.className = "experiment-field-label";
-      label.textContent = field.label;
 
       const selectedFlagId = normalizeId(section[field.key]);
       const selectedFlag = selectedFlagId !== null ? optionsById.get(selectedFlagId) : null;
       const fieldValue = document.createElement("div");
+      const isAaField = field.key === "aaFlagId";
+      const isAaExperiment = Boolean(section.isAaExperiment);
+      const hasSelectedValue = selectedFlagId !== null && Boolean(selectedFlag);
 
-      if (selectedFlagId !== null && selectedFlag) {
+      if (isAaField && hasSelectedValue) {
+        label.textContent = "AA experiment";
         fieldValue.className = "experiment-field-selected";
         const badge = document.createElement("span");
         badge.className = "value-badge";
@@ -659,26 +691,82 @@ function renderExperimentSetupSection() {
           void handleClearExperimentFlag(section.id, field.key);
         });
         fieldValue.append(badge, removeButton);
-      } else {
-        const select = document.createElement("select");
-        select.className = "experiment-field-select";
-        const defaultOption = document.createElement("option");
-        defaultOption.value = "";
-        defaultOption.textContent = "Select flag";
-        select.append(defaultOption);
-
-        const availableOptions = getFieldOptions(options, sections, section.id, field.key);
-        for (const option of availableOptions) {
-          const optionElement = document.createElement("option");
-          optionElement.value = String(option.id);
-          optionElement.textContent = `${option.name} (ID ${option.id})`;
-          select.append(optionElement);
-        }
-        select.disabled = availableOptions.length === 0;
-        select.addEventListener("change", () => {
-          void handleSelectExperimentFlag(section.id, field.key, select.value);
+      } else if (isAaField) {
+        label.classList.add("experiment-field-label-with-checkbox");
+        const labelText = document.createElement("span");
+        labelText.textContent = field.label;
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.className = "experiment-aa-checkbox";
+        checkbox.checked = isAaExperiment;
+        checkbox.addEventListener("change", () => {
+          void handleToggleSectionAaExperiment(section.id, checkbox.checked);
         });
-        fieldValue.append(select);
+        label.append(labelText, checkbox);
+
+        if (!isAaExperiment) {
+          const select = document.createElement("select");
+          select.className = "experiment-field-select";
+          const defaultOption = document.createElement("option");
+          defaultOption.value = "";
+          defaultOption.textContent = "Select flag";
+          select.append(defaultOption);
+
+          const availableOptions = getFieldOptions(options, sections, section.id, field.key);
+          for (const option of availableOptions) {
+            const optionElement = document.createElement("option");
+            optionElement.value = String(option.id);
+            optionElement.textContent = `${option.name} (ID ${option.id})`;
+            select.append(optionElement);
+          }
+          if (selectedFlagId !== null) {
+            select.value = String(selectedFlagId);
+          }
+          select.disabled = availableOptions.length === 0;
+          select.addEventListener("change", () => {
+            if (select.value === "") {
+              void handleClearExperimentFlag(section.id, field.key);
+              return;
+            }
+            void handleSelectExperimentFlag(section.id, field.key, select.value);
+          });
+          row.classList.toggle("experiment-field-row-error", selectedFlagId === null);
+          fieldValue.append(select);
+        }
+      } else {
+        label.textContent = field.label;
+
+        if (hasSelectedValue) {
+          fieldValue.className = "experiment-field-selected";
+          const badge = document.createElement("span");
+          badge.className = "value-badge";
+          badge.textContent = `${selectedFlag.name} (ID ${selectedFlag.id})`;
+          const removeButton = createExperimentDeleteIconButton();
+          removeButton.addEventListener("click", () => {
+            void handleClearExperimentFlag(section.id, field.key);
+          });
+          fieldValue.append(badge, removeButton);
+        } else {
+          const select = document.createElement("select");
+          select.className = "experiment-field-select";
+          const defaultOption = document.createElement("option");
+          defaultOption.value = "";
+          defaultOption.textContent = "Select flag";
+          select.append(defaultOption);
+
+          const availableOptions = getFieldOptions(options, sections, section.id, field.key);
+          for (const option of availableOptions) {
+            const optionElement = document.createElement("option");
+            optionElement.value = String(option.id);
+            optionElement.textContent = `${option.name} (ID ${option.id})`;
+            select.append(optionElement);
+          }
+          select.disabled = availableOptions.length === 0;
+          select.addEventListener("change", () => {
+            void handleSelectExperimentFlag(section.id, field.key, select.value);
+          });
+          fieldValue.append(select);
+        }
       }
 
       row.append(label, fieldValue);

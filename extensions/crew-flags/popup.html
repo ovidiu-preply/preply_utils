@@ -185,15 +185,32 @@
         grid-template-columns: 130px 1fr;
         column-gap: 8px;
         align-items: center;
+        border-radius: 6px;
+        padding: 4px 6px;
       }
 
       .experiment-field-row + .experiment-field-row {
         margin-top: 6px;
       }
 
+      .experiment-field-row-error {
+        background: #fef2f2;
+        border: 1px solid #fecaca;
+      }
+
       .experiment-field-label {
         font-size: 11px;
         color: #4b5563;
+      }
+
+      .experiment-field-label-with-checkbox {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .experiment-aa-checkbox {
+        margin: 0;
       }
 
       .experiment-field-select {

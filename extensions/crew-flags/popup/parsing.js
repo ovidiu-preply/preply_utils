@@ -74,7 +74,8 @@ export function sanitizeExperimentSetupByDomain(rawMap) {
       rolloutFlagId: normalizeFlagId(section.rolloutFlagId),
       studentAFlagId: normalizeFlagId(section.studentAFlagId),
       studentBFlagId: normalizeFlagId(section.studentBFlagId),
-      aaFlagId: normalizeFlagId(section.aaFlagId)
+      aaFlagId: normalizeFlagId(section.aaFlagId),
+      isAaExperiment: Boolean(section.isAaExperiment)
     };
   };
 
