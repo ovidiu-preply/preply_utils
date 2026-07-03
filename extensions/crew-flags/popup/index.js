@@ -890,14 +890,11 @@ function renderExperimentSetupSection() {
     const sectionExperimentFlagId = normalizeId(section.experimentFlagId);
     const sectionExperimentFlag =
       sectionExperimentFlagId !== null ? optionsById.get(sectionExperimentFlagId) : null;
-    const header = document.createElement("div");
-    header.className = "experiment-section-header";
-    const title = document.createElement("h3");
-    title.className = "experiment-section-title";
     const sectionName = sectionExperimentFlagId
       ? sectionExperimentFlag?.name || `Section ${sectionIndex + 1}`
       : `Section ${sectionIndex + 1}`;
-    title.textContent = sectionName;
+    const mainRow = document.createElement("div");
+    mainRow.className = "experiment-section-main-row";
     const removeSectionButton = document.createElement("button");
     removeSectionButton.className = "experiment-section-remove-icon-button";
     removeSectionButton.type = "button";
@@ -905,8 +902,6 @@ function renderExperimentSetupSection() {
     removeSectionButton.addEventListener("click", () => {
       void handleRemoveExperimentSection(section.id);
     });
-    header.append(title, removeSectionButton);
-    item.append(header);
     if (sectionExperimentFlag) {
       const sectionExperimentValidation = getExperimentFlagValidationState(
         section,
@@ -918,8 +913,15 @@ function renderExperimentSetupSection() {
         sectionExperimentValidation
       );
       sectionExperimentMeta.classList.add("experiment-section-main-flag");
-      item.append(sectionExperimentMeta);
+      mainRow.append(sectionExperimentMeta);
+    } else {
+      const fallback = document.createElement("span");
+      fallback.className = "experiment-field-label";
+      fallback.textContent = sectionName;
+      mainRow.append(fallback);
     }
+    mainRow.append(removeSectionButton);
+    item.append(mainRow);
 
     if (!Boolean(section.isAaExperiment)) {
       const targetRolloutRow = document.createElement("div");

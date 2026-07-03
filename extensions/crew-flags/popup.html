@@ -173,22 +173,11 @@
         margin-top: 8px;
       }
 
-      .experiment-section-title {
-        margin: 0 0 8px;
-        font-size: 12px;
-        color: #1f2937;
-        font-weight: 700;
-      }
-
-      .experiment-section-header {
+      .experiment-section-main-row {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         gap: 6px;
         margin-bottom: 8px;
-      }
-
-      .experiment-section-header .experiment-section-title {
-        margin: 0;
       }
 
       .experiment-section-remove-icon-button {
@@ -221,7 +210,7 @@
       }
 
       .experiment-section-main-flag {
-        margin: -2px 0 8px;
+        margin: 0;
       }
 
       .experiment-field-row {
@@ -275,6 +264,7 @@
         display: flex;
         align-items: flex-start;
         gap: 8px;
+        width: 100%;
       }
 
       .experiment-field-selected-details {
@@ -320,6 +310,7 @@
       .experiment-field-remove-button {
         width: 22px;
         height: 22px;
+        margin-left: auto;
         border: none;
         background: transparent;
         border-radius: 6px;
@@ -818,7 +809,6 @@
           </div>
         </section>
         <section class="experiment-setup-section">
-          <h2 class="experiment-setup-title">Configured sections</h2>
           <p id="experiment-setup-empty" class="experiment-setup-empty">No experiment sections yet.</p>
           <ul id="experiment-setup-list" class="experiment-setup-list"></ul>
         </section>
