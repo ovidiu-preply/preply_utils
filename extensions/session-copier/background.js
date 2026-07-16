@@ -3,6 +3,7 @@ const COPY_CURRENT_SESSION_MENU_ID = "copy-current-tab-session-id";
 const PASTE_CLIPBOARD_TO_CURRENT_SESSION_MENU_ID = "paste-clipboard-to-current-tab-session-id";
 const SESSION_COOKIE_NAME = "sessionid";
 const LOG_PREFIX = "[SessionCopier]";
+const MAX_COOKIE_VALUE_PREVIEW_LENGTH = 14;
 
 let menuBuildChain = Promise.resolve();
 let activeTabRefreshTimer = null;
@@ -68,6 +69,31 @@ function isCookieDomainCompatible(cookieDomain, targetHost) {
   );
 }
 
+function cookieValuePreview(cookieValue) {
+  if (!cookieValue) {
+    return "(empty)";
+  }
+
+  if (cookieValue.length <= MAX_COOKIE_VALUE_PREVIEW_LENGTH) {
+    return cookieValue;
+  }
+
+  return `${cookieValue.slice(0, MAX_COOKIE_VALUE_PREVIEW_LENGTH)}...`;
+}
+
+function cookieDescriptor(cookie) {
+  const domain = cookie.domain || "host-only";
+  const path = cookie.path || "/";
+  if (cookie.partitionKey?.topLevelSite) {
+    return `${domain}${path} [partitioned]`;
+  }
+  return `${domain}${path}`;
+}
+
+function menuTitleForCookie(cookie) {
+  return `${cookieDescriptor(cookie)} -> ${cookieValuePreview(cookie.value)}`;
+}
+
 async function ensureRootMenu() {
   await chrome.contextMenus.removeAll();
   await chrome.contextMenus.create({
@@ -107,6 +133,23 @@ async function rebuildSourceMenus(currentTab) {
 
   if (!isCurrentTabSupported) {
     return;
+  }
+
+  const currentTabCookies = await getSessionCookiesForSourceTab(currentTab);
+  if (currentTabCookies.length > 1) {
+    await chrome.contextMenus.update(COPY_CURRENT_SESSION_MENU_ID, {
+      title: "Copy current tab session id (choose cookie)",
+      enabled: true
+    });
+
+    for (let cookieIndex = 0; cookieIndex < currentTabCookies.length; cookieIndex += 1) {
+      await chrome.contextMenus.create({
+        id: `copy-current-cookie-${cookieIndex}`,
+        parentId: COPY_CURRENT_SESSION_MENU_ID,
+        title: menuTitleForCookie(currentTabCookies[cookieIndex]),
+        contexts: ["page"]
+      });
+    }
   }
 
   const allTabs = await chrome.tabs.query({});
@@ -150,14 +193,36 @@ async function rebuildSourceMenus(currentTab) {
 
     for (let tabIndex = 0; tabIndex < tabsForHost.length; tabIndex += 1) {
       const tab = tabsForHost[tabIndex];
+      const tabMenuId = `source-tab-parent-${tab.id}`;
       const copyMenuId = `source-tab-${tab.id}`;
       const goMenuId = `source-tab-go-${tab.id}`;
-      await chrome.contextMenus.create({
-        id: copyMenuId,
-        parentId: domainMenuId,
-        title: toDisplayTitle(tab),
-        contexts: ["page"]
-      });
+      const sourceCookies = await getSessionCookiesForSourceTab(tab);
+
+      if (sourceCookies.length <= 1) {
+        await chrome.contextMenus.create({
+          id: copyMenuId,
+          parentId: domainMenuId,
+          title: toDisplayTitle(tab),
+          contexts: ["page"]
+        });
+      } else {
+        await chrome.contextMenus.create({
+          id: tabMenuId,
+          parentId: domainMenuId,
+          title: toDisplayTitle(tab),
+          contexts: ["page"]
+        });
+
+        for (let cookieIndex = 0; cookieIndex < sourceCookies.length; cookieIndex += 1) {
+          await chrome.contextMenus.create({
+            id: `source-tab-cookie-${tab.id}-${cookieIndex}`,
+            parentId: tabMenuId,
+            title: menuTitleForCookie(sourceCookies[cookieIndex]),
+            contexts: ["page"]
+          });
+        }
+      }
+
       await chrome.contextMenus.create({
         id: goMenuId,
         parentId: domainMenuId,
@@ -219,23 +284,19 @@ async function getCookieStoreIdForTabId(tabId) {
 }
 
 async function getSessionCookieForSourceTab(sourceTab) {
+  const sourceCookies = await getSessionCookiesForSourceTab(sourceTab);
+  return sourceCookies[0] ?? null;
+}
+
+async function getSessionCookiesForSourceTab(sourceTab) {
   if (!sourceTab.id || !sourceTab.url) {
-    return null;
+    return [];
   }
 
   const sourceStoreId = await getCookieStoreIdForTabId(sourceTab.id);
-  const directCookie = await chrome.cookies.get({
-    url: sourceTab.url,
-    name: SESSION_COOKIE_NAME,
-    ...(sourceStoreId ? { storeId: sourceStoreId } : {})
-  });
-  if (directCookie) {
-    return directCookie;
-  }
-
   const sourceParsedUrl = parseUrl(sourceTab.url);
   if (!sourceParsedUrl) {
-    return null;
+    return [];
   }
 
   const allByName = await chrome.cookies.getAll({
@@ -243,10 +304,17 @@ async function getSessionCookieForSourceTab(sourceTab) {
     ...(sourceStoreId ? { storeId: sourceStoreId } : {})
   });
   const sourceHost = normalizeHost(sourceParsedUrl.hostname);
-  const anyForHost = allByName.find(
+  const candidates = allByName.filter(
     (cookie) => cookie.domain && isCookieDomainCompatible(cookie.domain, sourceHost)
   );
-  return anyForHost ?? allByName[0] ?? null;
+  candidates.sort((left, right) => {
+    const pathLengthDiff = (right.path?.length ?? 0) - (left.path?.length ?? 0);
+    if (pathLengthDiff !== 0) {
+      return pathLengthDiff;
+    }
+    return (left.domain || "").localeCompare(right.domain || "");
+  });
+  return candidates;
 }
 
 async function getSessionCookieForTargetTab(targetTab) {
@@ -294,8 +362,27 @@ function sourceTabIdFromMenuItem(menuItemId) {
   return Number(match[1]);
 }
 
+function sourceTabCookieSelectionFromMenuItem(menuItemId) {
+  const match = /^source-tab-cookie-(\d+)-(\d+)$/.exec(String(menuItemId));
+  if (!match) {
+    return null;
+  }
+  return {
+    sourceTabId: Number(match[1]),
+    cookieIndex: Number(match[2])
+  };
+}
+
 function sourceTabIdFromGoMenuItem(menuItemId) {
   const match = /^source-tab-go-(\d+)$/.exec(String(menuItemId));
+  if (!match) {
+    return null;
+  }
+  return Number(match[1]);
+}
+
+function copyCurrentCookieSelectionFromMenuItem(menuItemId) {
+  const match = /^copy-current-cookie-(\d+)$/.exec(String(menuItemId));
   if (!match) {
     return null;
   }
@@ -311,12 +398,12 @@ async function resolveTargetTab(clickedTab) {
   return activeTabs[0] ?? null;
 }
 
-async function copySessionCookie(sourceTab, targetTab) {
+async function copySessionCookie(sourceTab, targetTab, preferredSourceCookie = null) {
   if (!sourceTab.url || !targetTab.url) {
     return { ok: false, reason: "missing-tab-url" };
   }
 
-  const sourceCookie = await getSessionCookieForSourceTab(sourceTab);
+  const sourceCookie = preferredSourceCookie ?? (await getSessionCookieForSourceTab(sourceTab));
 
   if (!sourceCookie) {
     console.warn(`${LOG_PREFIX} source cookie missing`, {
@@ -603,6 +690,40 @@ if (chrome.contextMenus.onShown?.addListener) {
 }
 
 chrome.contextMenus.onClicked.addListener((info, clickedTab) => {
+  const copyCurrentCookieIndex = copyCurrentCookieSelectionFromMenuItem(info.menuItemId);
+  if (copyCurrentCookieIndex !== null) {
+    resolveTargetTab(clickedTab)
+      .then(async (maybeTargetTab) => {
+        const targetTab = maybeTargetTab?.id ? await getTabOrNull(maybeTargetTab.id) : null;
+        if (!targetTab) {
+          console.warn("Cannot copy sessionid to clipboard: target tab closed.");
+          return;
+        }
+
+        const sourceCookies = await getSessionCookiesForSourceTab(targetTab);
+        const selectedCookie = sourceCookies[copyCurrentCookieIndex];
+        if (!selectedCookie?.value) {
+          console.warn("Session id clipboard copy skipped: selected-cookie-missing");
+          return;
+        }
+
+        const copied = await copyTextToClipboardOnTab(targetTab.id, selectedCookie.value);
+        if (!copied) {
+          console.warn("Session id clipboard copy skipped: clipboard-copy-failed");
+          return;
+        }
+
+        console.warn(`${LOG_PREFIX} copied selected session id to clipboard`, {
+          targetTabId: targetTab.id,
+          cookieDescriptor: cookieDescriptor(selectedCookie)
+        });
+      })
+      .catch((error) => {
+        console.error("Failed to copy selected current tab session id", error);
+      });
+    return;
+  }
+
   if (info.menuItemId === COPY_CURRENT_SESSION_MENU_ID) {
     resolveTargetTab(clickedTab)
       .then(async (maybeTargetTab) => {
@@ -672,7 +793,8 @@ chrome.contextMenus.onClicked.addListener((info, clickedTab) => {
   }
 
   const sourceTabId = sourceTabIdFromMenuItem(info.menuItemId);
-  if (!sourceTabId) {
+  const sourceCookieSelection = sourceTabCookieSelectionFromMenuItem(info.menuItemId);
+  if (!sourceTabId && !sourceCookieSelection) {
     return;
   }
 
@@ -681,7 +803,8 @@ chrome.contextMenus.onClicked.addListener((info, clickedTab) => {
     clickedTabId: clickedTab?.id ?? null
   });
 
-  Promise.all([getTabOrNull(sourceTabId), resolveTargetTab(clickedTab)])
+  const selectedSourceTabId = sourceCookieSelection?.sourceTabId ?? sourceTabId;
+  Promise.all([getTabOrNull(selectedSourceTabId), resolveTargetTab(clickedTab)])
     .then(async ([sourceTab, maybeTargetTab]) => {
       const targetTab = maybeTargetTab?.id ? await getTabOrNull(maybeTargetTab.id) : null;
       if (!sourceTab || !targetTab) {
@@ -689,7 +812,16 @@ chrome.contextMenus.onClicked.addListener((info, clickedTab) => {
         return;
       }
 
-      const result = await copySessionCookie(sourceTab, targetTab);
+      const selectedCookie =
+        sourceCookieSelection !== null
+          ? (await getSessionCookiesForSourceTab(sourceTab))[sourceCookieSelection.cookieIndex] ?? null
+          : null;
+      if (sourceCookieSelection !== null && !selectedCookie) {
+        console.warn("Session copy skipped: selected-source-cookie-missing");
+        return;
+      }
+
+      const result = await copySessionCookie(sourceTab, targetTab, selectedCookie);
       if (!result.ok) {
         console.warn(`Session copy skipped: ${result.reason}`);
       } else {
